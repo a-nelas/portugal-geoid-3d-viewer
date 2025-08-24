@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GeodPT08 — 3D Viewer (Portugal Border)</title>
+  <!-- Pin a Plotly 2.x version to avoid the v1 warning -->
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
+  <style>
+    :root { --bg:#0b0f19; --panel:#121829; --ink:#e7eaf3; --muted:#97a0b5; --border:#1f2840; }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0}
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; color:var(--ink); background: radial-gradient(1200px 800px at 10% -10%, #142040, transparent), var(--bg); display:grid; grid-template-rows:auto 1fr auto; gap:12px;}
+    header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+    header h1{font-size:18px;margin:0;letter-spacing:.4px}
+    .btn{appearance:none;border:1px solid var(--border);background:#121829;color:var(--ink);padding:8px 12px;border-radius:12px;cursor:pointer}
+    .btn:hover{border-color:#2b3658}
+    #content{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px;min-height:0}
+    @media(max-width:900px){#content{grid-template-columns:1fr}}
+    #sidebar{background:rgba(18,24,41,.7);border:1px solid var(--border);border-radius:16px;padding:14px;display:grid;gap:12px;align-content:start;min-height:0}
+    .card{background:rgba(8,12,26,.6);border:1px solid var(--border);border-radius:14px;padding:12px}
+    .card h2{margin:0 0 8px;font-size:14px;color:var(--muted);font-weight:600;letter-spacing:.3px}
+    .small{color:var(--muted);font-size:12px;line-height:1.4}
+    #plot{background:rgba(12,16,32,.55);border:1px solid var(--border);border-radius:16px;min-height:420px;height:100%}
+    footer{color:var(--muted);font-size:12px;padding:8px 16px;border-top:1px solid var(--border)}
+    code.kbd{background:rgba(255,255,255,.06);border:1px solid var(--border);padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>GeodPT08 — 3D Viewer</h1>
+    <div class="actions">
+      <button id="resetView" class="btn" title="Reset camera">Reset view</button>
+    </div>
+  </header>
+
+  <div id="content">
+    <aside id="sidebar">
+      <div class="card">
+        <h2>How it works</h2>
+        <p class="small">Put these files next to this page:</p>
+        <ul class="small" style="margin:0; padding-left:16px;">
+          <li><code class="kbd">GeodPT08.dat</code> — rows: <code class="kbd">lon lat height</code>.</li>
+          <li><code class="kbd">CNTR_BN_20M_2024_4326.geojson</code> — GISCO boundary <em>lines</em>, WGS84.</li>
+        </ul>
+        <p class="small">Border lines are projected onto the surface. Madeira/Azores are removed (lon &lt; -12).</p>
+      </div>
+      <div class="card">
+        <h2>Status</h2>
+        <div id="status" class="small">Ready. Auto-loading…</div>
+      </div>
+    </aside>
+
+    <main id="plot"></main>
+  </div>
+
+  <footer>Built with Plotly.js 2.x</footer>
+
+  <script>
+    function qs(sel){ return document.querySelector(sel); }
+    var statusEl = qs('#status');
+    function setStatus(m){ statusEl.textContent = m; }
+
+    function roundN(num, n){ if(n===void 0) n=8; return Math.round((+num) * Math.pow(10,n)) / Math.pow(10,n); }
+
+    // Parse whitespace x y z
+    function parseDAT(text){
+      var pts=[], bad=0, lines=text.split(/\r?\n/);
+      for(var i=0;i<lines.length;i++){
+        var line=(lines[i]||'').trim();
+        if(!line || line.indexOf('#')===0 || line.indexOf('//')===0) continue;
+        var s=line.split(/[\s,;]+/).filter(Boolean);
+        if(s.length<3){ bad++; continue; }
+        var x=parseFloat(s[0]), y=parseFloat(s[1]), z=parseFloat(s[2]);
+        if(isNaN(x)||isNaN(y)||isNaN(z)){ bad++; continue; }
+        pts.push({x:x,y:y,z:z});
+      }
+      return {pts:pts,bad:bad};
+    }
+
+    // Grid detection for surface
+    function detectGrid(pts){
+      if(!pts.length) return null;
+      var xKeys=new Map(), yKeys=new Map(), grid=new Map();
+      for(var i=0;i<pts.length;i++){
+        var p=pts[i]; var xk=roundN(p.x).toFixed(8), yk=roundN(p.y).toFixed(8);
+        if(!xKeys.has(xk)) xKeys.set(xk,p.x); if(!yKeys.has(yk)) yKeys.set(yk,p.y);
+        grid.set(yk+'|'+xk, p.z);
+      }
+      var xs=Array.from(xKeys.entries()).sort(function(a,b){return a[1]-b[1];});
+      var ys=Array.from(yKeys.entries()).sort(function(a,b){return a[1]-b[1];});
+      if(xs.length*ys.length!==pts.length) return null;
+      for(var yi=0; yi<ys.length; yi++){ for(var xi=0; xi<xs.length; xi++){ if(!grid.has(ys[yi][0]+'|'+xs[xi][0])) return null; } }
+      var Z=[], X=xs.map(function(e){return e[1];}), Y=ys.map(function(e){return e[1];});
+      for(var yj=0; yj<ys.length; yj++){ var row=[]; for(var xi2=0; xi2<xs.length; xi2++){ row.push(grid.get(ys[yj][0]+'|'+xs[xi2][0])); } Z.push(row); }
+      return {X:X,Y:Y,Z:Z};
+    }
+
+    function baseLayout(title){
+      return { title:{text:'3D '+title, font:{size:16}},
+        scene:{ xaxis:{title:'X (e.g., lon)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
+                yaxis:{title:'Y (e.g., lat)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
+                zaxis:{title:'Height (meters)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
+                aspectmode:'cube', bgcolor:'rgba(0,0,0,0)' },
+        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:10,r:10,t:40,b:10} };
+    }
+
+    function plotScatter(pts){
+      var x=pts.map(function(p){return p.x;}), y=pts.map(function(p){return p.y;}), z=pts.map(function(p){return p.z;});
+      Plotly.newPlot('plot', [{ type:'scatter3d', mode:'markers', x:x, y:y, z:z, marker:{size:3,opacity:0.9}, hovertemplate:'x: %{x:.5f}<br>y: %{y:.5f}<br>height: %{z:.5f} m<extra></extra>' }], baseLayout('Scatter'), {responsive:true});
+      addPortugalOverlayUsingData({mode:'scatter', pts:pts});
+    }
+
+    function plotSurface(grid){
+      Plotly.newPlot('plot', [{ type:'surface', x:grid.X, y:grid.Y, z:grid.Z, contours:{z:{show:true,usecolormap:true,highlight:false}}, colorbar:{title:'Height (m)'}, hovertemplate:'x: %{x:.5f}<br>y: %{y:.5f}<br>height: %{z:.5f} m<extra></extra>' }], baseLayout('Surface'), {responsive:true});
+      addPortugalOverlayUsingData({mode:'grid', grid:grid});
+    }
+
+    async function loadDAT(url){
+      setStatus("Loading '"+url+"'…");
+      try{
+        var res=await fetch(url); if(!res.ok) throw new Error('HTTP '+res.status);
+        var text=await res.text(); var parsed=parseDAT(text); if(!parsed.pts.length) throw new Error('No valid data rows found.');
+        var grid=detectGrid(parsed.pts);
+        if(grid){ setStatus('Loaded '+parsed.pts.length+' as SURFACE ('+grid.Y.length+'×'+grid.X.length+').'+(parsed.bad?(' Skipped '+parsed.bad+' malformed line(s).'):'') ); plotSurface(grid); }
+        else { setStatus('Loaded '+parsed.pts.length+' as SCATTER.'+(parsed.bad?(' Skipped '+parsed.bad+' malformed line(s).'):'') ); plotScatter(parsed.pts); }
+      }catch(err){ console.error(err); setStatus('Failed: '+err.message+' Ensure files sit next to index.html'); }
+    }
+
+    // ---- Overlay helpers ----
+    var LON_MIN_MAINLAND = -12; // drop Madeira/Azores
+    var COLOR_LAND = '#4a2f27'; // dark brown
+    var COLOR_SEA  = '#0b2a5b'; // dark blue
+    var EPS = 0.25; // tiny lift to avoid z-fighting
+
+    function featureTouchesPortugalBN(props){
+      var p=props||{};
+      var vals=[p.LEFT_URI,p.RIGHT_URI,p.LEFT_ISO3,p.RIGHT_ISO3,p.LEFT_CNTR_ID,p.RIGHT_CNTR_ID,p.CNTR_LEFT,p.CNTR_RIGHT,p.ADM0_A3_L,p.ADM0_A3_R,p.CNTR_ID_L,p.CNTR_ID_R]
+        .filter(function(v){return v!=null;}).map(function(v){return String(v).toUpperCase();});
+      for(var i=0;i<vals.length;i++){ var v=vals[i]; if(v==='PRT' || v==='PT') return true; }
+      return false;
+    }
+    function isCoastal(props){
+      var p=props||{}; if(String(p.COAS_FLAG||'').toUpperCase()==='T') return true;
+      var left=(p.LEFT_URI||'').toString().toUpperCase(), right=(p.RIGHT_URI||'').toString().toUpperCase();
+      var sea=['SEA','OCE','OCEAN','ATL','ATLANTIC','WATER'];
+      for(var i=0;i<sea.length;i++){ var t=sea[i]; if(left===t || right===t) return true; }
+      return false;
+    }
+    function linesFromGeometry(g){
+      if(!g) return []; if(g.type==='LineString') return [g.coordinates]; if(g.type==='MultiLineString') return g.coordinates;
+      if(g.type==='Polygon') return g.coordinates; if(g.type==='MultiPolygon') return g.coordinates.flat(); return [];
+    }
+
+    // Grid interpolation / nearest fallback
+    function buildGridLookup(grid){ return {X:grid.X,Y:grid.Y,Z:grid.Z}; }
+    function findBracket(arr,v){ var n=arr.length; if(v<arr[0]||v>arr[n-1]) return -1; for(var i=0;i<n-1;i++){ if(v>=arr[i] && v<=arr[i+1]) return i; } return -1; }
+    function bilinearZ(glu, lon, lat){ var ix=findBracket(glu.X,lon), iy=findBracket(glu.Y,lat); if(ix<0||iy<0) return null; var x0=glu.X[ix],x1=glu.X[ix+1],y0=glu.Y[iy],y1=glu.Y[iy+1]; var z00=glu.Z[iy][ix],z10=glu.Z[iy][ix+1],z01=glu.Z[iy+1][ix],z11=glu.Z[iy+1][ix+1]; var tx=(lon-x0)/(x1-x0), ty=(lat-y0)/(y1-y0); var z0=z00*(1-tx)+z10*tx, z1=z01*(1-tx)+z11*tx; return z0*(1-ty)+z1*ty; }
+    function nearestZFromPts(pts, lon, lat){ var best=Infinity, z=null; for(var i=0;i<pts.length;i++){ var dx=pts[i].x-lon, dy=pts[i].y-lat, d=dx*dx+dy*dy; if(d<best){ best=d; z=pts[i].z; } } return z; }
+
+    async function addPortugalOverlayUsingData(data){
+      try{
+        var res=await fetch('CNTR_BN_20M_2024_4326.geojson'); if(!res.ok) throw new Error('GeoJSON '+res.status);
+        var gj=await res.json(); var feats=(gj.type==='FeatureCollection')?gj.features:[gj];
+        var matches=feats.filter(function(f){ return featureTouchesPortugalBN(f.properties); });
+        if(!matches.length){ console.warn('No BN segments touching PRT found.'); return; }
+        var traces=[]; var glu=null; if(data.mode==='grid') glu=buildGridLookup(data.grid);
+        for(var fi=0; fi<matches.length; fi++){
+          var f=matches[fi]; var segs=linesFromGeometry(f.geometry); var coastal=isCoastal(f.properties); var color=coastal?COLOR_SEA:COLOR_LAND;
+          for(var si=0; si<segs.length; si++){
+            var seg=segs[si];
+            // Filter out islands: any coordinate with lon < -12 removes the whole segment
+            var mainland=true; for(var p=0; p<seg.length; p++){ if(seg[p][0] < LON_MIN_MAINLAND){ mainland=false; break; } }
+            if(!mainland) continue;
+            var xs=[],ys=[],zs=[];
+            for(var pi=0; pi<seg.length; pi++){
+              var lon=seg[pi][0], lat=seg[pi][1]; xs.push(lon); ys.push(lat);
+              var z=null;
+              if(glu){ z=bilinearZ(glu,lon,lat); if(z===null) z=0; }
+              else { z=nearestZFromPts(data.pts,lon,lat); if(z===null) z=0; }
+              zs.push(z+EPS);
+            }
+            traces.push({ type:'scatter3d', mode:'lines', x:xs, y:ys, z:zs, hoverinfo:'skip', showlegend:false, line:{width:3, color:color} });
+          }
+        }
+        if(traces.length) Plotly.addTraces('plot', traces);
+      }catch(e){ console.warn('Border overlay failed:', e); }
+    }
+
+    // Reset camera
+    qs('#resetView').addEventListener('click', function(){ Plotly.relayout('plot', { 'scene.camera': { eye: { x: 1.6, y: 1.6, z: 0.9 } } }); });
+
+    // Auto-load data at startup
+    loadDAT('GeodPT08.dat');
+
+    // Responsive
+    window.addEventListener('resize', function(){ Plotly.Plots.resize(document.getElementById('plot')); });
+  </script>
+</body>
+</html>
