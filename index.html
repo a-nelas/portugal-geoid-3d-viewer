@@ -49,6 +49,16 @@
         <h2>Status</h2>
         <div id="status" class="small">Ready. Auto-loading…</div>
       </div>
+      <div class="card">
+        <h2>Representation</h2>
+        <p class="small">Z-axis represents N (geoid undulation).</p>
+        <ul class="small" style="margin:0; padding-left:16px;">
+          <li><p class="small">H = orthometric height: your physical elevation above the geoid (i.e., mean sea level).</p>
+          <li><p class="small">h = ellipsoidal height (what GNSS gives you, above the reference ellipsoid).</p>
+          <li><p class="small">N = geoid undulation (separation between ellipsoid and geoid).</p>
+        </ul>
+        <p class="small">Formula: H = h - N.</p>
+      </div>
     </aside>
 
     <main id="plot"></main>
@@ -129,8 +139,8 @@
 
     // ---- Overlay helpers ----
     var LON_MIN_MAINLAND = -12; // drop Madeira/Azores
-    var COLOR_LAND = '#806D67'; // dark brown
-    var COLOR_SEA  = '#102e5e'; // dark blue
+    var COLOR_LAND = '#000000'; // black
+    var COLOR_SEA  = '#000000'; // black
     var EPS = 0.4; // tiny lift to avoid z-fighting
 
     function featureTouchesPortugalBN(props){
