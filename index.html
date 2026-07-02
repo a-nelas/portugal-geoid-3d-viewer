@@ -16,8 +16,8 @@
     .btn{appearance:none;border:1px solid var(--border);background:#121829;color:var(--ink);padding:8px 12px;border-radius:12px;cursor:pointer}
     .btn:hover{border-color:#2b3658}
     #content{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px;min-height:0}
-    @media(max-width:900px){#content{grid-template-columns:1fr}}
-    #sidebar{background:rgba(18,24,41,.7);border:1px solid var(--border);border-radius:16px;padding:14px;display:grid;gap:12px;align-content:start;min-height:0}
+    @media(max-width:900px){#content{grid-template-columns:1fr;grid-template-rows:auto 1fr} #sidebar{max-height:45vh}}
+    #sidebar{background:rgba(18,24,41,.7);border:1px solid var(--border);border-radius:16px;padding:14px;display:grid;gap:12px;align-content:start;min-height:0;overflow-y:auto}
     .card{background:rgba(8,12,26,.6);border:1px solid var(--border);border-radius:14px;padding:12px}
     .card h2{margin:0 0 8px;font-size:14px;color:var(--muted);font-weight:600;letter-spacing:.3px}
     .small{color:var(--muted);font-size:12px;line-height:1.4}
@@ -50,14 +50,64 @@
         <div id="status" class="small">Ready. Auto-loading…</div>
       </div>
       <div class="card">
-        <h2>Representation</h2>
-        <p class="small">Z-axis represents N (geoid undulation).</p>
-        <ul class="small" style="margin:0; padding-left:16px;">
-          <li><p class="small">H = orthometric height: your physical elevation above the geoid (i.e., mean sea level).</p>
-          <li><p class="small">h = ellipsoidal height (what GNSS gives you, above the reference ellipsoid).</p>
-          <li><p class="small">N = geoid undulation (separation between ellipsoid and geoid).</p>
+        <h2>Geoid vs ellipsoid</h2>
+        <svg viewBox="0 0 296 200" width="100%" role="img" aria-label="Cross-section showing terrain, geoid and ellipsoid, with heights h, H and N at a point P" style="display:block;max-width:360px;margin:2px auto 8px;">
+          <defs>
+            <marker id="ah-h" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#ffd166"/></marker>
+            <marker id="ah-H" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#06d6a0"/></marker>
+            <marker id="ah-N" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#ef476f"/></marker>
+          </defs>
+
+          <!-- terrain -->
+          <path d="M96,150 C140,118 178,96 196,62 C202,51 206,48 210,48 C214,48 226,62 242,82 C260,100 276,102 288,102 L288,200 L96,200 Z" fill="#39513b" opacity="0.7"/>
+          <path d="M96,150 C140,118 178,96 196,62 C202,51 206,48 210,48 C214,48 226,62 242,82 C260,100 276,102 288,102" fill="none" stroke="#7fb069" stroke-width="1.5"/>
+          <text x="128" y="174" font-size="9" fill="#a9c39a">terrain</text>
+
+          <!-- ellipsoid: smooth, dashed, continues under everything -->
+          <path d="M8,156 Q148,136 288,156" fill="none" stroke="#b48cff" stroke-width="2" stroke-dasharray="6 4"/>
+          <text x="12" y="147" font-size="9" fill="#b48cff">ellipsoid</text>
+
+          <!-- geoid: wavy, continues under the land -->
+          <path d="M8,164 C50,172 70,150 110,142 C150,134 170,126 210,120 C250,114 270,118 288,116" fill="none" stroke="#4cc9f0" stroke-width="2"/>
+          <text x="12" y="180" font-size="9" fill="#4cc9f0">geoid = mean sea level</text>
+
+          <!-- point P on the summit -->
+          <line x1="188" y1="48" x2="236" y2="48" stroke="#e7eaf3" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"/>
+          <circle cx="210" cy="48" r="3.2" fill="#e7eaf3"/>
+          <text x="203" y="40" font-size="10" fill="#e7eaf3">P</text>
+
+          <!-- h: ellipsoid to P -->
+          <line x1="196" y1="146" x2="196" y2="52" stroke="#ffd166" stroke-width="2" marker-start="url(#ah-h)" marker-end="url(#ah-h)"/>
+          <text x="184" y="104" font-size="12" font-weight="bold" fill="#ffd166">h</text>
+
+          <!-- H: geoid to P -->
+          <line x1="224" y1="115" x2="224" y2="52" stroke="#06d6a0" stroke-width="2" marker-start="url(#ah-H)" marker-end="url(#ah-H)"/>
+          <text x="231" y="88" font-size="12" font-weight="bold" fill="#06d6a0">H</text>
+
+          <!-- N: ellipsoid to geoid -->
+          <line x1="224" y1="148" x2="224" y2="122" stroke="#ef476f" stroke-width="2" marker-start="url(#ah-N)" marker-end="url(#ah-N)"/>
+          <text x="231" y="140" font-size="12" font-weight="bold" fill="#ef476f">N</text>
+        </svg>
+        <p class="small"><b style="color:#4cc9f0">The geoid</b> is where gravity says &ldquo;sea level&rdquo; is: the shape the oceans would settle into if they could flow freely under the continents. It is lumpy, because Earth&rsquo;s gravity is lumpy &mdash; mountain ranges and dense rock pull the &ldquo;level&rdquo; surface up and down.</p>
+        <p class="small"><b style="color:#b48cff">The ellipsoid</b> (WGS84) is a perfectly smooth mathematical squashed sphere. It ignores gravity entirely &mdash; it exists so GPS has a simple surface to count from.</p>
+        <p class="small">The 3D surface in this viewer is the gap between the two: <b style="color:#ef476f">N</b>, the geoid undulation. Over mainland Portugal the geoid floats <b>44.9&ndash;58.2&nbsp;m above</b> the ellipsoid.</p>
+      </div>
+      <div class="card">
+        <h2>Three heights, one point</h2>
+        <p class="small">Pick any point <b>P</b> on the ground:</p>
+        <ul class="small" style="margin:0 0 8px; padding-left:16px;">
+          <li><b style="color:#ffd166">h</b> &mdash; ellipsoidal height: the raw GNSS/GPS number, measured from the ellipsoid.</li>
+          <li><b style="color:#06d6a0">H</b> &mdash; orthometric height: measured from the geoid, i.e. above mean sea level. What maps and signs mean.</li>
+          <li><b style="color:#ef476f">N</b> &mdash; the gap between the two references at that spot.</li>
         </ul>
-        <p class="small">Formula: H = h - N.</p>
+        <p class="small" style="text-align:center; font-size:15px; margin:6px 0;"><b style="color:#06d6a0">H</b> &nbsp;=&nbsp; <b style="color:#ffd166">h</b> &nbsp;&minus;&nbsp; <b style="color:#ef476f">N</b></p>
+        <p class="small">That subtraction is this grid&rsquo;s whole job: it turns GPS heights into real elevations.</p>
+      </div>
+      <div class="card">
+        <h2>Altitude vs elevation</h2>
+        <p class="small"><b>Elevation</b> belongs to the ground: how high a <em>place</em> sits above sea level (its <b style="color:#06d6a0">H</b>). A town&rsquo;s elevation doesn&rsquo;t change.</p>
+        <p class="small"><b>Altitude</b> belongs to an object: how high something <em>is</em> right now &mdash; a plane, a drone, you on a trail. It needs a stated reference: above mean sea level (MSL) or above the ground (AGL).</p>
+        <p class="small">&#9888; A GPS receiver&rsquo;s &ldquo;altitude&rdquo; is <b style="color:#ffd166">h</b>. In Portugal that reads roughly 45&ndash;58&nbsp;m too high until you subtract <b style="color:#ef476f">N</b>.</p>
       </div>
     </aside>
 
@@ -108,21 +158,21 @@
 
     function baseLayout(title){
       return { title:{text:'3D '+title, font:{size:16}},
-        scene:{ xaxis:{title:'X (e.g., lon)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
-                yaxis:{title:'Y (e.g., lat)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
-                zaxis:{title:'Height (meters)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
+        scene:{ xaxis:{title:'Longitude (°)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
+                yaxis:{title:'Latitude (°)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
+                zaxis:{title:'N — geoid undulation (m)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
                 aspectmode:'cube', bgcolor:'rgba(0,0,0,0)' },
         paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:10,r:10,t:40,b:10} };
     }
 
     function plotScatter(pts){
       var x=pts.map(function(p){return p.x;}), y=pts.map(function(p){return p.y;}), z=pts.map(function(p){return p.z;});
-      Plotly.newPlot('plot', [{ type:'scatter3d', mode:'markers', x:x, y:y, z:z, marker:{size:3,opacity:0.9}, hovertemplate:'x: %{x:.5f}<br>y: %{y:.5f}<br>height: %{z:.5f} m<extra></extra>' }], baseLayout('Scatter'), {responsive:true});
+      Plotly.newPlot('plot', [{ type:'scatter3d', mode:'markers', x:x, y:y, z:z, marker:{size:3,opacity:0.9}, hovertemplate:'lon: %{x:.5f}°<br>lat: %{y:.5f}°<br>N: %{z:.3f} m<extra></extra>' }], baseLayout('Scatter'), {responsive:true});
       addPortugalOverlayUsingData({mode:'scatter', pts:pts});
     }
 
     function plotSurface(grid){
-      Plotly.newPlot('plot', [{ type:'surface', x:grid.X, y:grid.Y, z:grid.Z, contours:{z:{show:true,usecolormap:true,highlight:false}}, colorbar:{title:'Height (m)'}, hovertemplate:'x: %{x:.5f}<br>y: %{y:.5f}<br>height: %{z:.5f} m<extra></extra>' }], baseLayout('Surface'), {responsive:true});
+      Plotly.newPlot('plot', [{ type:'surface', x:grid.X, y:grid.Y, z:grid.Z, contours:{z:{show:true,usecolormap:true,highlight:false}}, colorbar:{title:'N (m)'}, hovertemplate:'lon: %{x:.5f}°<br>lat: %{y:.5f}°<br>N: %{z:.3f} m<extra></extra>' }], baseLayout('Surface'), {responsive:true});
       addPortugalOverlayUsingData({mode:'grid', grid:grid});
     }
 
