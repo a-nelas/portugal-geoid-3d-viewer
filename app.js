@@ -3,8 +3,9 @@
 
   // ---------- Config ----------
   var DATA_URL = 'data/portugal.json';  // built by tools/build_data.py
-  var RELIEF = 30;                      // ground relief is drawn this many times smaller
   var LIFT = 0.4;                       // metres; keeps lines off the surfaces (z-fighting)
+  var LIFT_GROUND = 8;                  // same, for lines on the ground (height axis spans ~2 km)
+  var BOX_Z = 0.4;                      // box height relative to its longest side (auto-fit)
 
   var C = {
     geoid: '#4cc9f0', ellipsoid: '#b48cff', n: '#ef476f', ground: '#7fb069',
@@ -14,7 +15,6 @@
   var GROUND_SCALE = [[0, '#2f4a33'], [0.15, '#4f7a45'], [0.4, '#8fae6a'], [0.7, '#c9b98a'], [1, '#f1ece0']];
   var FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
 
-  var EXAG_MIN = 500, EXAG_MAX = 20000, EXAG_DEFAULT = 3000;
   var DEFAULT_PIN = { lon: -9.1393, lat: 38.7223, name: 'Lisbon' };
 
   var T = { ellipsoid: 0, geoid: 1, ground: 2, outlineE: 3, outlineTop: 4, curtain: 5, probe: 6 };
@@ -29,7 +29,7 @@
   };
 
   // g: grid ({lon0, lat0, step, nx, ny, N: Float32Array, H: Int16Array (-1 = no ground), X, Y, stats})
-  var state = { g: null, exag: EXAG_DEFAULT, groundOn: true, pin: null, outlineZ: null };
+  var state = { g: null, groundOn: true, pin: null, outlineZ: null };
 
   function $(sel) { return document.querySelector(sel); }
   function $all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
@@ -96,8 +96,8 @@
 
   function zTop() {
     var s = state.g.stats;
-    var top = state.groundOn ? s.nMax + s.hMax / RELIEF : s.nMax;
-    return Math.ceil((top + 2) / 10) * 10;
+    // Ground on: true heights up to ~1,940 m. Ground off: axis zooms onto the 45-58 m geoid.
+    return state.groundOn ? Math.ceil((s.nMax + s.hMax + 20) / 100) * 100 : Math.ceil((s.nMax + 2) / 10) * 10;
   }
 
   // ---------- Traces ----------
@@ -159,7 +159,7 @@
   var SEA = 60;
   function groundTrace(g) {
     var hMax = g.stats.hMax, cut = SEA / (hMax + SEA);
-    var z = rows(g, function (k) { return g.H[k] < 0 ? g.N[k] - 1 : g.N[k] + g.H[k] / RELIEF; });
+    var z = rows(g, function (k) { return g.H[k] < 0 ? g.N[k] - 1 : g.N[k] + g.H[k]; });
     var color = rows(g, function (k) { return g.H[k] < 0 ? -SEA : g.H[k]; });
     var scale = [[0, GROUND_SCALE[0][1]]].concat(GROUND_SCALE.map(function (s) { return [cut + s[0] * (1 - cut), s[1]]; }));
     return {
@@ -169,7 +169,7 @@
       lighting: { ambient: 0.6, diffuse: 0.8, specular: 0.05, roughness: 1, fresnel: 0.05 },
       lightposition: { x: -1e5, y: -1e5, z: 2e5 },
       contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
-      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>Ground</b>, relief shown ÷' + RELIEF + '<br>click to read its height<extra></extra>'
+      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>Ground</b>: click to read its height<extra></extra>'
     };
   }
 
@@ -180,7 +180,7 @@
       if (n === null) return;
       x.push(p[0]); y.push(p[1]); zE.push(LIFT);
       zGeoid.push(n + LIFT);
-      zGround.push(n + groundMaxAt(g, p[0], p[1]) / RELIEF + LIFT);
+      zGround.push(n + groundMaxAt(g, p[0], p[1]) + LIFT_GROUND);
     });
     state.outlineZ = { geoid: zGeoid, ground: zGround };
     var base = { type: 'scatter3d', mode: 'lines', x: x, y: y, hoverinfo: 'skip', showlegend: false };
@@ -230,9 +230,9 @@
     var midLat = (g.Y[0] + g.Y[g.ny - 1]) / 2 * Math.PI / 180;
     var kmX = (g.X[g.nx - 1] - g.X[0]) * 111.32 * Math.cos(midLat);
     var kmY = (g.Y[g.ny - 1] - g.Y[0]) * 110.57;
-    var kmZ = zTop() / 1000 * state.exag;
     var m = Math.max(kmX, kmY);
-    return { x: kmX / m, y: kmY / m, z: kmZ / m };
+    // Horizontal proportions are true; the height axis is fitted to a fixed box height
+    return { x: kmX / m, y: kmY / m, z: BOX_Z };
   }
 
   function layout() {
@@ -250,7 +250,7 @@
         camera: CAMERAS.perspective,
         xaxis: axis('Longitude', { ticksuffix: '°', dtick: 1 }),
         yaxis: axis('Latitude', { ticksuffix: '°', dtick: 1 }),
-        zaxis: axis('Height above ellipsoid (m)', { range: [0, zTop()], dtick: 10 })
+        zaxis: axis('Height above ellipsoid (m)', { range: [0, zTop()] })
       }
     };
   }
@@ -262,7 +262,7 @@
   function drawProbe() {
     var p = state.pin;
     if (!p) return;
-    var top = p.n + (state.groundOn && p.h !== null ? p.h / RELIEF : 0);
+    var top = p.n + (state.groundOn && p.h !== null ? p.h : 0);
     var labelZ = top + zTop() * 0.08;
     // Segment ellipsoid → geoid, a gap, then a label point floating above the surfaces
     Plotly.restyle(plotEl, {
@@ -302,17 +302,10 @@
   }
 
   // ---------- Controls ----------
-  function exagFromSlider(v) {
-    var e = EXAG_MIN * Math.pow(EXAG_MAX / EXAG_MIN, v / 1000);
-    var p = Math.pow(10, Math.floor(Math.log10(e)) - 1);   // two significant figures
-    return Math.round(e / p) * p;
-  }
-  function sliderFromExag(e) { return Math.round(1000 * Math.log(e / EXAG_MIN) / Math.log(EXAG_MAX / EXAG_MIN)); }
-
   function setGround(on) {
     state.groundOn = on;
     Plotly.restyle(plotEl, { z: [on ? state.outlineZ.ground : state.outlineZ.geoid] }, [T.outlineTop]);
-    Plotly.relayout(plotEl, { 'scene.zaxis.range': [0, zTop()], 'scene.aspectratio': aspect() });
+    Plotly.relayout(plotEl, { 'scene.zaxis.range': [0, zTop()] });
     drawProbe();
   }
 
@@ -333,19 +326,6 @@
       });
     });
 
-    var slider = $('#exag'), label = $('#exagOut'), pending = false;
-    slider.value = sliderFromExag(EXAG_DEFAULT);
-    label.textContent = '×' + EXAG_DEFAULT.toLocaleString('en-US');
-    slider.addEventListener('input', function () {
-      state.exag = exagFromSlider(+slider.value);
-      label.textContent = '×' + state.exag.toLocaleString('en-US');
-      if (pending) return;
-      pending = true;
-      requestAnimationFrame(function () {
-        pending = false;
-        Plotly.relayout(plotEl, { 'scene.aspectratio': aspect() });
-      });
-    });
 
     $('#hIn').addEventListener('input', updateConverter);
 

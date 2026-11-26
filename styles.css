@@ -122,7 +122,6 @@ body {
 .ov { position: absolute; z-index: 2; }
 .ov-layers { top: 12px; left: 12px; max-width: 300px; }
 .ov-readout { top: 12px; right: 12px; width: 252px; }
-.ov-exag { bottom: 12px; left: 12px; width: 280px; }
 .ov-camera { bottom: 12px; right: 12px; }
 
 .panel {

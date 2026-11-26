@@ -6,12 +6,12 @@ Interactive 3D view of mainland Portugal's terrain, the **GeodPT08 geoid** (mean
 
 | Layer | Meaning |
 | --- | --- |
-| **Ground** (green) | Real terrain (SRTM), sitting on the geoid. Relief is shown 30× smaller so mountains fit beside the 50 m gap. |
+| **Ground** (green) | Real terrain (SRTM) at its true height above the geoid. |
 | **Geoid** (blue) | Where gravity puts "sea level". Height zero for maps and road signs. |
 | **Ellipsoid** (purple) | A smooth mathematical surface. Height zero for GPS. |
 | **Gap N** (red) | The geoid undulation: how far the geoid sits above the ellipsoid. |
 
-All heights are exaggerated (×500 to ×20,000, adjustable). Click the ground or the geoid to pin a point and read its N and ground height, and see **H = h − N** worked out.
+Horizontal proportions are true; the height axis is fitted to the box (0–2,000 m with the ground on, 0–70 m with it off, so the geoid's shape shows). Click the ground or the geoid to pin a point and read its N and ground height, and see **H = h − N** worked out.
 
 ## Run it
 

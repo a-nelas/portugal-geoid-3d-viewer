@@ -39,7 +39,7 @@
       <div class="ov ov-layers panel">
         <div class="panel-label">Layers</div>
         <div class="chips" role="group" aria-label="Layers">
-          <button class="chip" type="button" data-layer="ground" aria-pressed="true" style="--c:var(--ground)" title="Real terrain, relief shown 30× smaller"><span class="sw"></span>Ground</button>
+          <button class="chip" type="button" data-layer="ground" aria-pressed="true" style="--c:var(--ground)" title="Real terrain at its true height"><span class="sw"></span>Ground</button>
           <button class="chip" type="button" data-layer="geoid" aria-pressed="true" style="--c:var(--geoid)"><span class="sw"></span>Geoid</button>
           <button class="chip" type="button" data-layer="ellipsoid" aria-pressed="true" style="--c:var(--ellipsoid)"><span class="sw"></span>Ellipsoid</button>
           <button class="chip" type="button" data-layer="gap" aria-pressed="true" style="--c:var(--n)"><span class="sw"></span>Gap N</button>
@@ -68,12 +68,6 @@
         <p class="hint"><span id="hHint"></span> Click the ground or the geoid to move the pin.</p>
       </div>
 
-      <div class="ov ov-exag panel">
-        <label class="panel-label" for="exag">Vertical exaggeration <output id="exagOut">×3,000</output></label>
-        <input id="exag" type="range" min="0" max="1000" step="1" />
-        <p class="hint">At true scale (×1) the 50 m gap would be thinner than a line.</p>
-      </div>
-
       <div class="ov ov-camera panel">
         <div class="panel-label">View</div>
         <div class="seg" role="group" aria-label="Camera">
@@ -90,12 +84,12 @@
         <h2>What you're looking at</h2>
         <p>Mainland Portugal&rsquo;s ground and the two surfaces heights are measured from, drawn in the same 3D space:</p>
         <ul class="legend">
-          <li><span class="sw" style="--c:var(--ground)"></span><div><b class="c-ground">Ground</b>: the real terrain, sitting on the geoid. Its relief is shrunk 30&times; so that mountains of nearly 2,000&nbsp;m fit beside the 50&nbsp;m gap.</div></li>
+          <li><span class="sw" style="--c:var(--ground)"></span><div><b class="c-ground">Ground</b>: the real terrain at its true height, rising up to nearly 2,000&nbsp;m from the geoid.</div></li>
           <li><span class="sw" style="--c:var(--ellipsoid)"></span><div><b class="c-ellipsoid">Ellipsoid</b>: the flat purple plane. Height zero for GPS.</div></li>
           <li><span class="sw" style="--c:var(--geoid)"></span><div><b class="c-geoid">Geoid</b>: the blue surface floating above it, visible over the sea and Spain. Height zero for sea level.</div></li>
           <li><span class="sw" style="--c:var(--n)"></span><div><b class="c-n">N</b>: the vertical gap between them, drawn in red along the coast and at the pin.</div></li>
         </ul>
-        <p class="muted">All heights are also stretched thousands of times. Drag to rotate, scroll to zoom, and switch to <em>Side</em> to see the gap edge-on, like the diagram below.</p>
+        <p class="muted">The height axis is fitted to the box, so it is far more stretched than the map. Next to 2&nbsp;km mountains the 50&nbsp;m gap is a thin band: turn <em>Ground</em> off and the axis zooms onto the geoid. Drag to rotate, scroll to zoom, and switch to <em>Side</em> to see it edge-on, like the diagram below.</p>
       </section>
 
       <section>
