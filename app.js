@@ -290,8 +290,8 @@
       $('#hIn').value = (h + n).toFixed(1);   // what a GPS standing on this ground would read
     }
     $('#hHint').textContent = onLand
-      ? 'Prefilled with H + N: what a GPS on this ground would read.'
-      : 'Over the sea: type any GPS height.';
+      ? 'Example: h is prefilled with H + N, the raw GPS height on this ground.'
+      : 'Over the sea: type any raw GPS height.';
     updateConverter();
   }
 

@@ -61,11 +61,12 @@
           <dt><b class="c-n">N</b> geoid above ellipsoid</dt><dd class="c-n" id="pinN">—</dd>
         </dl>
         <div class="converter">
-          <label for="hIn"><b class="c-h">h</b> GPS height</label>
+          <label for="hIn"><b class="c-h">h</b> raw GPS height</label>
           <div class="field"><input id="hIn" type="number" inputmode="decimal" step="0.1" value="150" /><span>m</span></div>
           <div class="result"><b class="c-H">H</b> = <b class="c-h">h</b> − <b class="c-n">N</b> = <output id="hOut" for="hIn">—</output></div>
         </div>
         <p class="hint"><span id="hHint"></span> Click the ground or the geoid to move the pin.</p>
+        <p class="device-note"><b>Note:</b> most phones, watches and handheld GPS units show height above sea level (<b class="c-H">H</b>), not the raw GPS height (<b class="c-h">h</b>). They do this same subtraction for you, using the satellite fix and a built-in geoid model.</p>
       </div>
 
       <div class="ov ov-camera panel">
@@ -153,6 +154,7 @@
         <p><b>Elevation</b> belongs to the ground: how high a <em>place</em> sits above sea level (its <b class="c-H">H</b>). A town&rsquo;s elevation doesn&rsquo;t change.</p>
         <p><b>Altitude</b> belongs to an object: how high something <em>is</em> right now, such as a plane, a drone or you on a trail. It needs a stated reference: above mean sea level (MSL) or above the ground (AGL).</p>
         <p class="note">A GPS receiver&rsquo;s raw &ldquo;altitude&rdquo; is <b class="c-h">h</b>. In Portugal it reads roughly 45&ndash;58&nbsp;m too high until you subtract <b class="c-n">N</b>.</p>
+        <p class="note">Most devices don&rsquo;t show that raw number, though. Phones, watches, car navigation and handheld GPS units display elevation above sea level (<b class="c-H">H</b>). They still start from the satellite value <b class="c-h">h</b> and subtract <b class="c-n">N</b> from a built-in geoid model, usually a coarse global one such as EGM96, so their figure can be off by a metre or so. The raw <b class="c-h">h</b> mostly shows up in survey receivers and in Android&rsquo;s location data.</p>
       </section>
 
       <section>
