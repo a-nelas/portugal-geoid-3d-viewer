@@ -3,55 +3,103 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GeodPT08 — 3D Viewer (Portugal Border)</title>
-  <!-- Pin a Plotly 2.x version to avoid the v1 warning -->
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js"></script>
-  <style>
-    :root { --bg:#0b0f19; --panel:#121829; --ink:#e7eaf3; --muted:#97a0b5; --border:#1f2840; }
-    *{box-sizing:border-box}
-    html,body{height:100%;margin:0}
-    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial; color:var(--ink); background: radial-gradient(1200px 800px at 10% -10%, #142040, transparent), var(--bg); display:grid; grid-template-rows:auto 1fr auto; gap:12px;}
-    header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
-    header h1{font-size:18px;margin:0;letter-spacing:.4px}
-    .btn{appearance:none;border:1px solid var(--border);background:#121829;color:var(--ink);padding:8px 12px;border-radius:12px;cursor:pointer}
-    .btn:hover{border-color:#2b3658}
-    #content{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px;min-height:0}
-    @media(max-width:900px){#content{grid-template-columns:1fr;grid-template-rows:auto 1fr} #sidebar{max-height:45vh}}
-    #sidebar{background:rgba(18,24,41,.7);border:1px solid var(--border);border-radius:16px;padding:14px;display:grid;gap:12px;align-content:start;min-height:0;overflow-y:auto}
-    .card{background:rgba(8,12,26,.6);border:1px solid var(--border);border-radius:14px;padding:12px}
-    .card h2{margin:0 0 8px;font-size:14px;color:var(--muted);font-weight:600;letter-spacing:.3px}
-    .small{color:var(--muted);font-size:12px;line-height:1.4}
-    #plot{background:rgba(12,16,32,.55);border:1px solid var(--border);border-radius:16px;min-height:420px;height:100%}
-    footer{color:var(--muted);font-size:12px;padding:8px 16px;border-top:1px solid var(--border)}
-    code.kbd{background:rgba(255,255,255,.06);border:1px solid var(--border);padding:2px 6px;border-radius:6px}
-  </style>
+  <title>Geoid vs Ellipsoid · Portugal</title>
+  <meta name="description" content="The GeodPT08 geoid and the GRS80 ellipsoid over mainland Portugal, drawn together in 3D." />
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Plotly 2.x pinned (avoids the v1 deprecation warning) -->
+  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js" defer></script>
+  <script src="app.js" defer></script>
 </head>
 <body>
-  <header>
-    <h1>GeodPT08 — 3D Viewer</h1>
-    <div class="actions">
-      <button id="resetView" class="btn" title="Reset camera">Reset view</button>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <rect x="0.5" y="0.5" width="39" height="39" rx="10" fill="#151c33" stroke="#2a3456"/>
+        <path d="M6,25 Q20,21 34,25" fill="none" stroke="#b48cff" stroke-width="2" stroke-dasharray="3 2.5"/>
+        <path d="M6,19 C11,14 15,22 20,17 C25,12 29,18 34,14" fill="none" stroke="#4cc9f0" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="20" y1="17.5" x2="20" y2="23" stroke="#ef476f" stroke-width="2"/>
+      </svg>
+      <div>
+        <h1>Geoid vs ellipsoid: Portugal</h1>
+        <p>GeodPT08 geoid model, shown in 3D against its reference ellipsoid</p>
+      </div>
     </div>
+    <p class="credit">Geoid: GeodPT08 (DGT) · Boundaries: © EuroGeographics</p>
   </header>
 
-  <div id="content">
-    <aside id="sidebar">
-      <div class="card">
-        <h2>How it works</h2>
-        <p class="small">Put these files next to this page:</p>
-        <ul class="small" style="margin:0; padding-left:16px;">
-          <li><code class="kbd">GeodPT08.dat</code> — rows: <code class="kbd">lon lat height</code>.</li>
-          <li><code class="kbd">CNTR_BN_20M_2024_4326.geojson</code> — GISCO boundary <em>lines</em>, WGS84.</li>
+  <main class="app">
+    <!-- ============ 3D viewer ============ -->
+    <section class="viewer" aria-label="3D view of the geoid and the ellipsoid">
+      <div class="stage">
+        <div id="plot"></div>
+        <div class="loading" id="loading" role="status">
+          <div class="spinner" aria-hidden="true"></div>
+          <p id="loadingText">Loading the geoid grid…</p>
+        </div>
+      </div>
+
+      <div class="ov ov-layers panel">
+        <div class="panel-label">Layers</div>
+        <div class="chips" role="group" aria-label="Layers">
+          <button class="chip" type="button" data-layer="geoid" aria-pressed="true" style="--c:var(--geoid)"><span class="sw"></span>Geoid</button>
+          <button class="chip" type="button" data-layer="ellipsoid" aria-pressed="true" style="--c:var(--ellipsoid)"><span class="sw"></span>Ellipsoid</button>
+          <button class="chip" type="button" data-layer="gap" aria-pressed="true" style="--c:var(--n)"><span class="sw"></span>Gap N</button>
+          <button class="chip" type="button" data-layer="borders" aria-pressed="true" style="--c:var(--ink)"><span class="sw"></span>Borders</button>
+        </div>
+        <div class="scale" aria-label="Geoid colour scale">
+          <span id="nMin">45</span>
+          <div class="ramp"></div>
+          <span id="nMax">58 m</span>
+        </div>
+      </div>
+
+      <div class="ov ov-readout panel" aria-live="polite">
+        <div class="panel-label">Pinned point <span class="pin-name" id="pinName"></span></div>
+        <dl class="readout">
+          <dt>Latitude</dt><dd id="pinLat">—</dd>
+          <dt>Longitude</dt><dd id="pinLon">—</dd>
+          <dt><b class="c-n">N</b> geoid above ellipsoid</dt><dd class="c-n" id="pinN">—</dd>
+        </dl>
+        <div class="converter">
+          <label for="hIn"><b class="c-h">h</b> GPS height</label>
+          <div class="field"><input id="hIn" type="number" inputmode="decimal" step="0.1" value="150" /><span>m</span></div>
+          <div class="result"><b class="c-H">H</b> = <b class="c-h">h</b> − <b class="c-n">N</b> = <output id="hOut" for="hIn">—</output></div>
+        </div>
+        <p class="hint">Click anywhere on the geoid to move the pin.</p>
+      </div>
+
+      <div class="ov ov-exag panel">
+        <label class="panel-label" for="exag">Vertical exaggeration <output id="exagOut">×4,000</output></label>
+        <input id="exag" type="range" min="0" max="1000" step="1" />
+        <p class="hint">At true scale (×1) the 50 m gap would be thinner than a line.</p>
+      </div>
+
+      <div class="ov ov-camera panel">
+        <div class="panel-label">View</div>
+        <div class="seg" role="group" aria-label="Camera">
+          <button type="button" data-cam="perspective" aria-pressed="true">3D</button>
+          <button type="button" data-cam="side" aria-pressed="false">Side</button>
+          <button type="button" data-cam="top" aria-pressed="false">Top</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Guide ============ -->
+    <aside class="guide" aria-label="Guide">
+      <section>
+        <h2>What you're looking at</h2>
+        <p>Two reference surfaces over mainland Portugal, drawn in the same 3D space:</p>
+        <ul class="legend">
+          <li><span class="sw" style="--c:var(--ellipsoid)"></span><div><b class="c-ellipsoid">Ellipsoid</b>: the flat purple plane. Height zero for GPS.</div></li>
+          <li><span class="sw" style="--c:var(--geoid)"></span><div><b class="c-geoid">Geoid</b>: the blue surface floating above it. Height zero for sea level.</div></li>
+          <li><span class="sw" style="--c:var(--n)"></span><div><b class="c-n">N</b>: the vertical gap between them, drawn in red along the coast and at the pin.</div></li>
         </ul>
-        <p class="small">Border lines are projected onto the surface. Madeira/Azores are removed (lon &lt; -12).</p>
-      </div>
-      <div class="card">
-        <h2>Status</h2>
-        <div id="status" class="small">Ready. Auto-loading…</div>
-      </div>
-      <div class="card">
+        <p class="muted">Heights are stretched thousands of times. Drag to rotate, scroll to zoom, and switch to <em>Side</em> to see the gap edge-on, like the diagram below.</p>
+      </section>
+
+      <section>
         <h2>Geoid vs ellipsoid</h2>
-        <svg viewBox="0 0 296 200" width="100%" role="img" aria-label="Cross-section showing terrain, geoid and ellipsoid, with heights h, H and N at a point P" style="display:block;max-width:360px;margin:2px auto 8px;">
+        <svg class="diagram" viewBox="0 0 296 200" role="img" aria-label="Cross-section showing terrain, geoid and ellipsoid, with heights h, H and N at a point P">
           <defs>
             <marker id="ah-h" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#ffd166"/></marker>
             <marker id="ah-H" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" fill="#06d6a0"/></marker>
@@ -88,173 +136,39 @@
           <line x1="224" y1="148" x2="224" y2="122" stroke="#ef476f" stroke-width="2" marker-start="url(#ah-N)" marker-end="url(#ah-N)"/>
           <text x="231" y="140" font-size="12" font-weight="bold" fill="#ef476f">N</text>
         </svg>
-        <p class="small"><b style="color:#4cc9f0">The geoid</b> is where gravity says &ldquo;sea level&rdquo; is: the shape the oceans would settle into if they could flow freely under the continents. It is lumpy, because Earth&rsquo;s gravity is lumpy &mdash; mountain ranges and dense rock pull the &ldquo;level&rdquo; surface up and down.</p>
-        <p class="small"><b style="color:#b48cff">The ellipsoid</b> (WGS84) is a perfectly smooth mathematical squashed sphere. It ignores gravity entirely &mdash; it exists so GPS has a simple surface to count from.</p>
-        <p class="small">The 3D surface in this viewer is the gap between the two: <b style="color:#ef476f">N</b>, the geoid undulation. Over mainland Portugal the geoid floats <b>44.9&ndash;58.2&nbsp;m above</b> the ellipsoid.</p>
-      </div>
-      <div class="card">
+        <p><b class="c-geoid">The geoid</b> is where gravity says &ldquo;sea level&rdquo; is: the shape the oceans would settle into if they could flow freely under the continents. It is lumpy because Earth&rsquo;s gravity is lumpy. Mountain ranges and dense rock pull the level surface up and down.</p>
+        <p><b class="c-ellipsoid">The ellipsoid</b> is a smooth, slightly flattened sphere defined by a formula. It ignores gravity entirely; it exists so that GPS has a simple surface to measure from. GeodPT08 uses GRS80, the ellipsoid of ETRS89, which is practically identical to WGS84.</p>
+        <p>Over mainland Portugal the geoid sits <b>44.9&ndash;58.2&nbsp;m above</b> the ellipsoid. That gap is <b class="c-n">N</b>, the geoid undulation.</p>
+      </section>
+
+      <section>
         <h2>Three heights, one point</h2>
-        <p class="small">Pick any point <b>P</b> on the ground:</p>
-        <ul class="small" style="margin:0 0 8px; padding-left:16px;">
-          <li><b style="color:#ffd166">h</b> &mdash; ellipsoidal height: the raw GNSS/GPS number, measured from the ellipsoid.</li>
-          <li><b style="color:#06d6a0">H</b> &mdash; orthometric height: measured from the geoid, i.e. above mean sea level. What maps and signs mean.</li>
-          <li><b style="color:#ef476f">N</b> &mdash; the gap between the two references at that spot.</li>
+        <p>Pick any point <b>P</b> on the ground:</p>
+        <ul class="terms">
+          <li><b class="c-h">h</b>, ellipsoidal height: the raw GNSS/GPS reading, measured from the ellipsoid.</li>
+          <li><b class="c-H">H</b>, orthometric height: measured from the geoid, i.e. height above mean sea level. This is what maps and road signs mean.</li>
+          <li><b class="c-n">N</b>: the gap between the two surfaces at that spot.</li>
         </ul>
-        <p class="small" style="text-align:center; font-size:15px; margin:6px 0;"><b style="color:#06d6a0">H</b> &nbsp;=&nbsp; <b style="color:#ffd166">h</b> &nbsp;&minus;&nbsp; <b style="color:#ef476f">N</b></p>
-        <p class="small">That subtraction is this grid&rsquo;s whole job: it turns GPS heights into real elevations.</p>
-      </div>
-      <div class="card">
+        <p class="formula"><b class="c-H">H</b> = <b class="c-h">h</b> − <b class="c-n">N</b></p>
+        <p>That subtraction is what this grid is for: it turns GPS heights into real elevations. Try it in the <em>Pinned point</em> panel.</p>
+      </section>
+
+      <section>
         <h2>Altitude vs elevation</h2>
-        <p class="small"><b>Elevation</b> belongs to the ground: how high a <em>place</em> sits above sea level (its <b style="color:#06d6a0">H</b>). A town&rsquo;s elevation doesn&rsquo;t change.</p>
-        <p class="small"><b>Altitude</b> belongs to an object: how high something <em>is</em> right now &mdash; a plane, a drone, you on a trail. It needs a stated reference: above mean sea level (MSL) or above the ground (AGL).</p>
-        <p class="small">&#9888; A GPS receiver&rsquo;s &ldquo;altitude&rdquo; is <b style="color:#ffd166">h</b>. In Portugal that reads roughly 45&ndash;58&nbsp;m too high until you subtract <b style="color:#ef476f">N</b>.</p>
-      </div>
+        <p><b>Elevation</b> belongs to the ground: how high a <em>place</em> sits above sea level (its <b class="c-H">H</b>). A town&rsquo;s elevation doesn&rsquo;t change.</p>
+        <p><b>Altitude</b> belongs to an object: how high something <em>is</em> right now, such as a plane, a drone or you on a trail. It needs a stated reference: above mean sea level (MSL) or above the ground (AGL).</p>
+        <p class="note">A GPS receiver&rsquo;s raw &ldquo;altitude&rdquo; is <b class="c-h">h</b>. In Portugal it reads roughly 45&ndash;58&nbsp;m too high until you subtract <b class="c-n">N</b>.</p>
+      </section>
+
+      <section>
+        <h2>About the data</h2>
+        <ul class="terms">
+          <li><code>GeodPT08.dat</code>: the Portuguese geoid model from the Direção-Geral do Território (DGT), a regular grid of <code>lon lat N</code> rows. <span id="gridInfo"></span></li>
+          <li><code>CNTR_BN_20M_2024_4326.geojson</code>: GISCO country boundary lines (1:20 million, WGS84), © EuroGeographics. Madeira and the Azores are left out (longitude &lt; −12°).</li>
+        </ul>
+        <p class="muted">Both files sit next to <code>index.html</code>. Serve the folder over HTTP (for example <code>python -m http.server</code>); opening the file directly blocks the data from loading.</p>
+      </section>
     </aside>
-
-    <main id="plot"></main>
-  </div>
-
-  <footer>Built with Plotly.js 2.x</footer>
-
-  <script>
-    function qs(sel){ return document.querySelector(sel); }
-    var statusEl = qs('#status');
-    function setStatus(m){ statusEl.textContent = m; }
-
-    function roundN(num, n){ if(n===void 0) n=8; return Math.round((+num) * Math.pow(10,n)) / Math.pow(10,n); }
-
-    // Parse whitespace x y z
-    function parseDAT(text){
-      var pts=[], bad=0, lines=text.split(/\r?\n/);
-      for(var i=0;i<lines.length;i++){
-        var line=(lines[i]||'').trim();
-        if(!line || line.indexOf('#')===0 || line.indexOf('//')===0) continue;
-        var s=line.split(/[\s,;]+/).filter(Boolean);
-        if(s.length<3){ bad++; continue; }
-        var x=parseFloat(s[0]), y=parseFloat(s[1]), z=parseFloat(s[2]);
-        if(isNaN(x)||isNaN(y)||isNaN(z)){ bad++; continue; }
-        pts.push({x:x,y:y,z:z});
-      }
-      return {pts:pts,bad:bad};
-    }
-
-    // Grid detection for surface
-    function detectGrid(pts){
-      if(!pts.length) return null;
-      var xKeys=new Map(), yKeys=new Map(), grid=new Map();
-      for(var i=0;i<pts.length;i++){
-        var p=pts[i]; var xk=roundN(p.x).toFixed(8), yk=roundN(p.y).toFixed(8);
-        if(!xKeys.has(xk)) xKeys.set(xk,p.x); if(!yKeys.has(yk)) yKeys.set(yk,p.y);
-        grid.set(yk+'|'+xk, p.z);
-      }
-      var xs=Array.from(xKeys.entries()).sort(function(a,b){return a[1]-b[1];});
-      var ys=Array.from(yKeys.entries()).sort(function(a,b){return a[1]-b[1];});
-      if(xs.length*ys.length!==pts.length) return null;
-      for(var yi=0; yi<ys.length; yi++){ for(var xi=0; xi<xs.length; xi++){ if(!grid.has(ys[yi][0]+'|'+xs[xi][0])) return null; } }
-      var Z=[], X=xs.map(function(e){return e[1];}), Y=ys.map(function(e){return e[1];});
-      for(var yj=0; yj<ys.length; yj++){ var row=[]; for(var xi2=0; xi2<xs.length; xi2++){ row.push(grid.get(ys[yj][0]+'|'+xs[xi2][0])); } Z.push(row); }
-      return {X:X,Y:Y,Z:Z};
-    }
-
-    function baseLayout(title){
-      return { title:{text:'3D '+title, font:{size:16}},
-        scene:{ xaxis:{title:'Longitude (°)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
-                yaxis:{title:'Latitude (°)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
-                zaxis:{title:'N — geoid undulation (m)', gridcolor:'#2b3658', zerolinecolor:'#2b3658'},
-                aspectmode:'cube', bgcolor:'rgba(0,0,0,0)' },
-        paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', margin:{l:10,r:10,t:40,b:10} };
-    }
-
-    function plotScatter(pts){
-      var x=pts.map(function(p){return p.x;}), y=pts.map(function(p){return p.y;}), z=pts.map(function(p){return p.z;});
-      Plotly.newPlot('plot', [{ type:'scatter3d', mode:'markers', x:x, y:y, z:z, marker:{size:3,opacity:0.9}, hovertemplate:'lon: %{x:.5f}°<br>lat: %{y:.5f}°<br>N: %{z:.3f} m<extra></extra>' }], baseLayout('Scatter'), {responsive:true});
-      addPortugalOverlayUsingData({mode:'scatter', pts:pts});
-    }
-
-    function plotSurface(grid){
-      Plotly.newPlot('plot', [{ type:'surface', x:grid.X, y:grid.Y, z:grid.Z, contours:{z:{show:true,usecolormap:true,highlight:false}}, colorbar:{title:'N (m)'}, hovertemplate:'lon: %{x:.5f}°<br>lat: %{y:.5f}°<br>N: %{z:.3f} m<extra></extra>' }], baseLayout('Surface'), {responsive:true});
-      addPortugalOverlayUsingData({mode:'grid', grid:grid});
-    }
-
-    async function loadDAT(url){
-      setStatus("Loading '"+url+"'…");
-      try{
-        var res=await fetch(url); if(!res.ok) throw new Error('HTTP '+res.status);
-        var text=await res.text(); var parsed=parseDAT(text); if(!parsed.pts.length) throw new Error('No valid data rows found.');
-        var grid=detectGrid(parsed.pts);
-        if(grid){ setStatus('Loaded '+parsed.pts.length+' as SURFACE ('+grid.Y.length+'×'+grid.X.length+').'+(parsed.bad?(' Skipped '+parsed.bad+' malformed line(s).'):'') ); plotSurface(grid); }
-        else { setStatus('Loaded '+parsed.pts.length+' as SCATTER.'+(parsed.bad?(' Skipped '+parsed.bad+' malformed line(s).'):'') ); plotScatter(parsed.pts); }
-      }catch(err){ console.error(err); setStatus('Failed: '+err.message+' Ensure files sit next to index.html'); }
-    }
-
-    // ---- Overlay helpers ----
-    var LON_MIN_MAINLAND = -12; // drop Madeira/Azores
-    var COLOR_LAND = '#000000'; // black
-    var COLOR_SEA  = '#000000'; // black
-    var EPS = 0.4; // tiny lift to avoid z-fighting
-
-    function featureTouchesPortugalBN(props){
-      var p=props||{};
-      var vals=[p.LEFT_URI,p.RIGHT_URI,p.LEFT_ISO3,p.RIGHT_ISO3,p.LEFT_CNTR_ID,p.RIGHT_CNTR_ID,p.CNTR_LEFT,p.CNTR_RIGHT,p.ADM0_A3_L,p.ADM0_A3_R,p.CNTR_ID_L,p.CNTR_ID_R]
-        .filter(function(v){return v!=null;}).map(function(v){return String(v).toUpperCase();});
-      for(var i=0;i<vals.length;i++){ var v=vals[i]; if(v==='PRT' || v==='PT') return true; }
-      return false;
-    }
-    function isCoastal(props){
-      var p=props||{}; if(String(p.COAS_FLAG||'').toUpperCase()==='T') return true;
-      var left=(p.LEFT_URI||'').toString().toUpperCase(), right=(p.RIGHT_URI||'').toString().toUpperCase();
-      var sea=['SEA','OCE','OCEAN','ATL','ATLANTIC','WATER'];
-      for(var i=0;i<sea.length;i++){ var t=sea[i]; if(left===t || right===t) return true; }
-      return false;
-    }
-    function linesFromGeometry(g){
-      if(!g) return []; if(g.type==='LineString') return [g.coordinates]; if(g.type==='MultiLineString') return g.coordinates;
-      if(g.type==='Polygon') return g.coordinates; if(g.type==='MultiPolygon') return g.coordinates.flat(); return [];
-    }
-
-    // Grid interpolation / nearest fallback
-    function buildGridLookup(grid){ return {X:grid.X,Y:grid.Y,Z:grid.Z}; }
-    function findBracket(arr,v){ var n=arr.length; if(v<arr[0]||v>arr[n-1]) return -1; for(var i=0;i<n-1;i++){ if(v>=arr[i] && v<=arr[i+1]) return i; } return -1; }
-    function bilinearZ(glu, lon, lat){ var ix=findBracket(glu.X,lon), iy=findBracket(glu.Y,lat); if(ix<0||iy<0) return null; var x0=glu.X[ix],x1=glu.X[ix+1],y0=glu.Y[iy],y1=glu.Y[iy+1]; var z00=glu.Z[iy][ix],z10=glu.Z[iy][ix+1],z01=glu.Z[iy+1][ix],z11=glu.Z[iy+1][ix+1]; var tx=(lon-x0)/(x1-x0), ty=(lat-y0)/(y1-y0); var z0=z00*(1-tx)+z10*tx, z1=z01*(1-tx)+z11*tx; return z0*(1-ty)+z1*ty; }
-    function nearestZFromPts(pts, lon, lat){ var best=Infinity, z=null; for(var i=0;i<pts.length;i++){ var dx=pts[i].x-lon, dy=pts[i].y-lat, d=dx*dx+dy*dy; if(d<best){ best=d; z=pts[i].z; } } return z; }
-
-    async function addPortugalOverlayUsingData(data){
-      try{
-        var res=await fetch('CNTR_BN_20M_2024_4326.geojson'); if(!res.ok) throw new Error('GeoJSON '+res.status);
-        var gj=await res.json(); var feats=(gj.type==='FeatureCollection')?gj.features:[gj];
-        var matches=feats.filter(function(f){ return featureTouchesPortugalBN(f.properties); });
-        if(!matches.length){ console.warn('No BN segments touching PRT found.'); return; }
-        var traces=[]; var glu=null; if(data.mode==='grid') glu=buildGridLookup(data.grid);
-        for(var fi=0; fi<matches.length; fi++){
-          var f=matches[fi]; var segs=linesFromGeometry(f.geometry); var coastal=isCoastal(f.properties); var color=coastal?COLOR_SEA:COLOR_LAND;
-          for(var si=0; si<segs.length; si++){
-            var seg=segs[si];
-            // Filter out islands: any coordinate with lon < -12 removes the whole segment
-            var mainland=true; for(var p=0; p<seg.length; p++){ if(seg[p][0] < LON_MIN_MAINLAND){ mainland=false; break; } }
-            if(!mainland) continue;
-            var xs=[],ys=[],zs=[];
-            for(var pi=0; pi<seg.length; pi++){
-              var lon=seg[pi][0], lat=seg[pi][1]; xs.push(lon); ys.push(lat);
-              var z=null;
-              if(glu){ z=bilinearZ(glu,lon,lat); if(z===null) z=0; }
-              else { z=nearestZFromPts(data.pts,lon,lat); if(z===null) z=0; }
-              zs.push(z+EPS);
-            }
-            traces.push({ type:'scatter3d', mode:'lines', x:xs, y:ys, z:zs, hoverinfo:'skip', showlegend:false, line:{width:3, color:color} });
-          }
-        }
-        if(traces.length) Plotly.addTraces('plot', traces);
-      }catch(e){ console.warn('Border overlay failed:', e); }
-    }
-
-    // Reset camera
-    qs('#resetView').addEventListener('click', function(){ Plotly.relayout('plot', { 'scene.camera': { eye: { x: 1.6, y: 1.6, z: 0.9 } } }); });
-
-    // Auto-load data at startup
-    loadDAT('GeodPT08.dat');
-
-    // Responsive
-    window.addEventListener('resize', function(){ Plotly.Plots.resize(document.getElementById('plot')); });
-  </script>
+  </main>
 </body>
 </html>
