@@ -16,6 +16,7 @@
   --n: #ef476f;
   --h: #ffd166;
   --H: #06d6a0;
+  --ground: #7fb069;
 
   --radius: 14px;
   --gutter: 16px;
@@ -42,6 +43,7 @@ body {
 .c-n { color: var(--n); }
 .c-h { color: var(--h); }
 .c-H { color: var(--H); }
+.c-ground { color: var(--ground); }
 .muted { color: var(--muted); }
 
 /* ---------- Top bar ---------- */
@@ -230,6 +232,7 @@ input[type="range"] { width: 100%; margin: 2px 0 0; accent-color: var(--geoid); 
 .readout dt { color: var(--muted); }
 .readout dd { margin: 0; text-align: right; font-family: var(--mono); color: var(--ink); }
 .readout dd.c-n { color: var(--n); font-weight: 600; }
+.readout dd.c-H { color: var(--H); }
 
 .converter {
   display: grid;

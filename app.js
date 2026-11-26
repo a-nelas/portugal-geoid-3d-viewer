@@ -2,148 +2,124 @@
   'use strict';
 
   // ---------- Config ----------
-  var DAT_URL = 'GeodPT08.dat';
-  var BORDER_URL = 'CNTR_BN_20M_2024_4326.geojson';
-  var LON_MIN_MAINLAND = -12;          // drop Madeira / Azores
-  var LIFT = 0.4;                      // metres; keeps lines off the surfaces (z-fighting)
-  var CURTAIN_EVERY = 3;               // one gap line every n border vertices
+  var DATA_URL = 'data/portugal.json';  // built by tools/build_data.py
+  var RELIEF = 30;                      // ground relief is drawn this many times smaller
+  var LIFT = 0.4;                       // metres; keeps lines off the surfaces (z-fighting)
 
   var C = {
-    geoid: '#4cc9f0', ellipsoid: '#b48cff', n: '#ef476f',
+    geoid: '#4cc9f0', ellipsoid: '#b48cff', n: '#ef476f', ground: '#7fb069',
     ink: '#e8ebf4', muted: '#98a1b6', faint: '#6f7994', grid: '#222b45', line: '#323e60'
   };
   var GEOID_SCALE = [[0, '#173a7a'], [0.35, '#1f6fb8'], [0.7, '#4cc9f0'], [1, '#c4f1ff']];
+  var GROUND_SCALE = [[0, '#2f4a33'], [0.15, '#4f7a45'], [0.4, '#8fae6a'], [0.7, '#c9b98a'], [1, '#f1ece0']];
   var FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
 
-  var EXAG_MIN = 500, EXAG_MAX = 20000, EXAG_DEFAULT = 4000;
+  var EXAG_MIN = 500, EXAG_MAX = 20000, EXAG_DEFAULT = 3000;
   var DEFAULT_PIN = { lon: -9.1393, lat: 38.7223, name: 'Lisbon' };
 
-  var T = { ellipsoid: 0, geoid: 1, borderE: 2, borderG: 3, curtain: 4, probe: 5 };
-  var LAYERS = { geoid: [T.geoid], ellipsoid: [T.ellipsoid], gap: [T.curtain], borders: [T.borderE, T.borderG] };
+  var T = { ellipsoid: 0, geoid: 1, ground: 2, outlineE: 3, outlineTop: 4, curtain: 5, probe: 6 };
+  var LAYERS = { geoid: [T.geoid], ellipsoid: [T.ellipsoid], ground: [T.ground], gap: [T.curtain], borders: [T.outlineE, T.outlineTop] };
 
+  // All perspective: switching scene.camera.projection at runtime corrupts the WebGL scene
+  // in Plotly 2.30 (surfaces vanish, axes garble), so the presets only move the eye.
   var CAMERAS = {
-    perspective: { eye: { x: -1.25, y: -1.45, z: 0.85 }, up: { x: 0, y: 0, z: 1 }, center: { x: 0, y: 0, z: -0.12 }, projection: { type: 'perspective' } },
-    side:        { eye: { x: 0, y: -2.1, z: 0.02 },      up: { x: 0, y: 0, z: 1 }, center: { x: 0, y: 0, z: 0 },     projection: { type: 'orthographic' } },
-    top:         { eye: { x: 0, y: 0, z: 2.1 },          up: { x: 0, y: 1, z: 0 }, center: { x: 0, y: 0, z: 0 },     projection: { type: 'orthographic' } }
+    perspective: { eye: { x: -1.25, y: -1.45, z: 0.85 }, up: { x: 0, y: 0, z: 1 }, center: { x: 0, y: 0, z: -0.12 } },
+    side:        { eye: { x: 0.35, y: -2.2, z: 0.05 },   up: { x: 0, y: 0, z: 1 }, center: { x: 0, y: 0, z: 0 } },
+    top:         { eye: { x: 0, y: -0.01, z: 2.2 },      up: { x: 0, y: 1, z: 0 }, center: { x: 0, y: 0, z: 0 } }
   };
 
-  var state = { grid: null, zTop: 60, exag: EXAG_DEFAULT, pin: null };
+  // g: grid ({lon0, lat0, step, nx, ny, N: Float32Array, H: Int16Array (-1 = no ground), X, Y, stats})
+  var state = { g: null, exag: EXAG_DEFAULT, groundOn: true, pin: null, outlineZ: null };
 
   function $(sel) { return document.querySelector(sel); }
   function $all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
   var plotEl = $('#plot');
 
-  // ---------- Parsing ----------
-  function roundN(num, n) { if (n === void 0) n = 8; return Math.round((+num) * Math.pow(10, n)) / Math.pow(10, n); }
+  // Start downloading the data straight away (index.html also preloads it)
+  var dataPromise = fetch(DATA_URL).then(function (r) {
+    if (!r.ok) throw new Error(DATA_URL + ': HTTP ' + r.status);
+    return r.json();
+  });
 
-  // Whitespace / comma separated "x y z" rows
-  function parseDAT(text) {
-    var pts = [], bad = 0, lines = text.split(/\r?\n/);
-    for (var i = 0; i < lines.length; i++) {
-      var line = (lines[i] || '').trim();
-      if (!line || line.indexOf('#') === 0 || line.indexOf('//') === 0) continue;
-      var s = line.split(/[\s,;]+/).filter(Boolean);
-      if (s.length < 3) { bad++; continue; }
-      var x = parseFloat(s[0]), y = parseFloat(s[1]), z = parseFloat(s[2]);
-      if (isNaN(x) || isNaN(y) || isNaN(z)) { bad++; continue; }
-      pts.push({ x: x, y: y, z: z });
+  // ---------- Grid ----------
+  function toGrid(d) {
+    var size = d.nx * d.ny, N = new Float32Array(size), H = new Int16Array(size);
+    for (var k = 0; k < size; k++) { N[k] = d.N[k] / 100; H[k] = d.H[k]; }
+    var X = new Array(d.nx), Y = new Array(d.ny);
+    for (var i = 0; i < d.nx; i++) X[i] = +(d.lon0 + i * d.step).toFixed(6);
+    for (var j = 0; j < d.ny; j++) Y[j] = +(d.lat0 + j * d.step).toFixed(6);
+    return { lon0: d.lon0, lat0: d.lat0, step: d.step, nx: d.nx, ny: d.ny, N: N, H: H, X: X, Y: Y, outline: d.outline, stats: d.stats };
+  }
+
+  // Cell containing (lon, lat): {i, j, tx, ty}, or null when outside the grid. O(1).
+  function cell(g, lon, lat) {
+    var fx = (lon - g.lon0) / g.step, fy = (lat - g.lat0) / g.step;
+    if (fx < 0 || fy < 0 || fx > g.nx - 1 || fy > g.ny - 1) return null;
+    var i = Math.min(Math.floor(fx), g.nx - 2), j = Math.min(Math.floor(fy), g.ny - 2);
+    return { i: i, j: j, tx: fx - i, ty: fy - j };
+  }
+
+  function geoidAt(g, lon, lat) {
+    var c = cell(g, lon, lat);
+    if (!c) return null;
+    var k = c.j * g.nx + c.i, N = g.N;
+    var z0 = N[k] * (1 - c.tx) + N[k + 1] * c.tx;
+    var z1 = N[k + g.nx] * (1 - c.tx) + N[k + g.nx + 1] * c.tx;
+    return z0 * (1 - c.ty) + z1 * c.ty;
+  }
+
+  // Ground height at (lon, lat): bilinear where all four corners are land, else the
+  // nearest land corner; null in the sea / Spain.
+  function groundAt(g, lon, lat) {
+    var c = cell(g, lon, lat);
+    if (!c) return null;
+    var k = c.j * g.nx + c.i, H = g.H;
+    var h00 = H[k], h10 = H[k + 1], h01 = H[k + g.nx], h11 = H[k + g.nx + 1];
+    if (h00 >= 0 && h10 >= 0 && h01 >= 0 && h11 >= 0) {
+      var z0 = h00 * (1 - c.tx) + h10 * c.tx, z1 = h01 * (1 - c.tx) + h11 * c.tx;
+      return z0 * (1 - c.ty) + z1 * c.ty;
     }
-    return { pts: pts, bad: bad };
+    var corners = [[h00, c.tx * c.tx + c.ty * c.ty], [h10, (1 - c.tx) * (1 - c.tx) + c.ty * c.ty],
+                   [h01, c.tx * c.tx + (1 - c.ty) * (1 - c.ty)], [h11, (1 - c.tx) * (1 - c.tx) + (1 - c.ty) * (1 - c.ty)]];
+    var best = null, bestD = Infinity;
+    corners.forEach(function (p) { if (p[0] >= 0 && p[1] < bestD) { best = p[0]; bestD = p[1]; } });
+    return best;
   }
 
-  // Turns scattered points into X[], Y[], Z[y][x] if they form a complete regular grid
-  function detectGrid(pts) {
-    if (!pts.length) return null;
-    var xKeys = new Map(), yKeys = new Map(), grid = new Map();
-    for (var i = 0; i < pts.length; i++) {
-      var p = pts[i], xk = roundN(p.x).toFixed(8), yk = roundN(p.y).toFixed(8);
-      if (!xKeys.has(xk)) xKeys.set(xk, p.x);
-      if (!yKeys.has(yk)) yKeys.set(yk, p.y);
-      grid.set(yk + '|' + xk, p.z);
-    }
-    var xs = Array.from(xKeys.entries()).sort(function (a, b) { return a[1] - b[1]; });
-    var ys = Array.from(yKeys.entries()).sort(function (a, b) { return a[1] - b[1]; });
-    if (xs.length * ys.length !== pts.length) return null;
-    var Z = [], min = Infinity, max = -Infinity;
-    for (var yi = 0; yi < ys.length; yi++) {
-      var row = [];
-      for (var xi = 0; xi < xs.length; xi++) {
-        var key = ys[yi][0] + '|' + xs[xi][0];
-        if (!grid.has(key)) return null;
-        var z = grid.get(key);
-        if (z < min) min = z;
-        if (z > max) max = z;
-        row.push(z);
-      }
-      Z.push(row);
-    }
-    return { X: xs.map(function (e) { return e[1]; }), Y: ys.map(function (e) { return e[1]; }), Z: Z, min: min, max: max };
+  // Highest land corner of the cell (keeps outline lines above the ground surface)
+  function groundMaxAt(g, lon, lat) {
+    var c = cell(g, lon, lat);
+    if (!c) return 0;
+    var k = c.j * g.nx + c.i, H = g.H;
+    return Math.max(0, H[k], H[k + 1], H[k + g.nx], H[k + g.nx + 1]);
   }
 
-  // ---------- Grid lookup ----------
-  function findBracket(arr, v) {
-    var n = arr.length;
-    if (v < arr[0] || v > arr[n - 1]) return -1;
-    for (var i = 0; i < n - 1; i++) { if (v >= arr[i] && v <= arr[i + 1]) return i; }
-    return -1;
-  }
-  function bilinearZ(g, lon, lat) {
-    var ix = findBracket(g.X, lon), iy = findBracket(g.Y, lat);
-    if (ix < 0 || iy < 0) return null;
-    var x0 = g.X[ix], x1 = g.X[ix + 1], y0 = g.Y[iy], y1 = g.Y[iy + 1];
-    var z00 = g.Z[iy][ix], z10 = g.Z[iy][ix + 1], z01 = g.Z[iy + 1][ix], z11 = g.Z[iy + 1][ix + 1];
-    var tx = (lon - x0) / (x1 - x0), ty = (lat - y0) / (y1 - y0);
-    var z0 = z00 * (1 - tx) + z10 * tx, z1 = z01 * (1 - tx) + z11 * tx;
-    return z0 * (1 - ty) + z1 * ty;
-  }
-
-  // ---------- Borders ----------
-  function featureTouchesPortugalBN(props) {
-    var p = props || {};
-    var vals = [p.LEFT_URI, p.RIGHT_URI, p.LEFT_ISO3, p.RIGHT_ISO3, p.LEFT_CNTR_ID, p.RIGHT_CNTR_ID, p.CNTR_LEFT, p.CNTR_RIGHT, p.ADM0_A3_L, p.ADM0_A3_R, p.CNTR_ID_L, p.CNTR_ID_R]
-      .filter(function (v) { return v != null; }).map(function (v) { return String(v).toUpperCase(); });
-    for (var i = 0; i < vals.length; i++) { if (vals[i] === 'PRT' || vals[i] === 'PT') return true; }
-    return false;
-  }
-  function linesFromGeometry(g) {
-    if (!g) return [];
-    if (g.type === 'LineString') return [g.coordinates];
-    if (g.type === 'MultiLineString') return g.coordinates;
-    if (g.type === 'Polygon') return g.coordinates;
-    if (g.type === 'MultiPolygon') return g.coordinates.flat();
-    return [];
-  }
-
-  // Mainland Portugal border runs, each vertex carrying its N; runs break where they leave the grid
-  function borderRuns(geojson, grid) {
-    if (!geojson) return [];
-    var feats = geojson.type === 'FeatureCollection' ? geojson.features : [geojson];
-    var runs = [];
-    feats.filter(function (f) { return featureTouchesPortugalBN(f.properties); }).forEach(function (f) {
-      linesFromGeometry(f.geometry).forEach(function (seg) {
-        for (var i = 0; i < seg.length; i++) { if (seg[i][0] < LON_MIN_MAINLAND) return; }
-        var run = [];
-        for (var j = 0; j < seg.length; j++) {
-          var lon = seg[j][0], lat = seg[j][1], n = bilinearZ(grid, lon, lat);
-          if (n === null) { if (run.length > 1) runs.push(run); run = []; continue; }
-          run.push({ lon: lon, lat: lat, n: n });
-        }
-        if (run.length > 1) runs.push(run);
-      });
-    });
-    return runs;
+  function zTop() {
+    var s = state.g.stats;
+    var top = state.groundOn ? s.nMax + s.hMax / RELIEF : s.nMax;
+    return Math.ceil((top + 2) / 10) * 10;
   }
 
   // ---------- Traces ----------
   function stepped(a, b, s) {
     var out = [a];
-    for (var v = Math.ceil(a / s) * s; v < b - 1e-9; v += s) { if (v > a + 1e-9) out.push(roundN(v, 6)); }
+    for (var v = Math.ceil(a / s) * s; v < b - 1e-9; v += s) { if (v > a + 1e-9) out.push(+v.toFixed(6)); }
     out.push(b);
     return out;
   }
 
+  function rows(g, fn) {
+    var Z = new Array(g.ny);
+    for (var j = 0; j < g.ny; j++) {
+      var row = new Array(g.nx);
+      for (var i = 0; i < g.nx; i++) row[i] = fn(j * g.nx + i);
+      Z[j] = row;
+    }
+    return Z;
+  }
+
   function ellipsoidTrace(g) {
-    var x0 = g.X[0], x1 = g.X[g.X.length - 1], y0 = g.Y[0], y1 = g.Y[g.Y.length - 1];
+    var x0 = g.X[0], x1 = g.X[g.nx - 1], y0 = g.Y[0], y1 = g.Y[g.ny - 1];
     var ex = stepped(x0, x1, 0.5), ey = stepped(y0, y1, 0.5);
     var ez = ey.map(function () { return ex.map(function () { return 0; }); });
     var gridLine = { show: true, size: 0.5, color: 'rgba(206,180,255,0.55)', width: 1, highlight: false };
@@ -161,37 +137,72 @@
   }
 
   function geoidTrace(g) {
+    var s = g.stats;
     return {
-      type: 'surface', name: 'Geoid', x: g.X, y: g.Y, z: g.Z,
-      colorscale: GEOID_SCALE, cmin: g.min, cmax: g.max, showscale: false, opacity: 1,
+      type: 'surface', name: 'Geoid', x: g.X, y: g.Y, z: rows(g, function (k) { return g.N[k]; }),
+      colorscale: GEOID_SCALE, cmin: s.nMin, cmax: s.nMax, showscale: false, opacity: 1,
       lighting: { ambient: 0.72, diffuse: 0.6, specular: 0.08, roughness: 0.9, fresnel: 0.1 },
       lightposition: { x: -1e5, y: -1e5, z: 2e5 },
       contours: {
-        z: { show: true, start: Math.floor(g.min), end: Math.ceil(g.max), size: 1, color: 'rgba(8,16,36,0.35)', width: 1,
+        z: { show: true, start: Math.floor(s.nMin), end: Math.ceil(s.nMax), size: 1, color: 'rgba(8,16,36,0.35)', width: 1,
              highlight: true, highlightcolor: 'rgba(255,255,255,0.85)', highlightwidth: 2 },
         x: { highlight: false }, y: { highlight: false }
       },
-      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>N = %{z:.2f} m</b><extra></extra>'
+      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>N = %{z:.2f} m</b><extra>Geoid</extra>'
     };
   }
 
-  function lineTrace(runs, zOf, line) {
-    var x = [], y = [], z = [];
-    runs.forEach(function (run) {
-      run.forEach(function (p) { x.push(p.lon); y.push(p.lat); z.push(zOf(p)); });
-      x.push(null); y.push(null); z.push(null);
-    });
-    return { type: 'scatter3d', mode: 'lines', x: x, y: y, z: z, line: line, hoverinfo: 'skip', showlegend: false };
+  // Plotly's 3D surface picking breaks (stack overflow, no hover) when z has nulls, so cells
+  // outside Portugal sit just under the geoid and are made invisible with an opacity scale:
+  // they get surfacecolor -SEA, which maps below the `cut` where opacity drops to 0.
+  // (Surface hovertemplates only expose x/y/z, so the exact H is shown in the pin readout.)
+  var SEA = 60;
+  function groundTrace(g) {
+    var hMax = g.stats.hMax, cut = SEA / (hMax + SEA);
+    var z = rows(g, function (k) { return g.H[k] < 0 ? g.N[k] - 1 : g.N[k] + g.H[k] / RELIEF; });
+    var color = rows(g, function (k) { return g.H[k] < 0 ? -SEA : g.H[k]; });
+    var scale = [[0, GROUND_SCALE[0][1]]].concat(GROUND_SCALE.map(function (s) { return [cut + s[0] * (1 - cut), s[1]]; }));
+    return {
+      type: 'surface', name: 'Ground', x: g.X, y: g.Y, z: z, surfacecolor: color,
+      colorscale: scale, cmin: -SEA, cmax: hMax, showscale: false,
+      opacityscale: [[0, 0], [cut * 0.98, 0], [cut, 1], [1, 1]],
+      lighting: { ambient: 0.6, diffuse: 0.8, specular: 0.05, roughness: 1, fresnel: 0.05 },
+      lightposition: { x: -1e5, y: -1e5, z: 2e5 },
+      contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
+      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>Ground</b>, relief shown ÷' + RELIEF + '<br>click to read its height<extra></extra>'
+    };
   }
 
-  function curtainTrace(runs) {
-    var x = [], y = [], z = [];
-    runs.forEach(function (run) {
-      for (var i = 0; i < run.length; i += CURTAIN_EVERY) {
-        var p = run[i];
-        x.push(p.lon, p.lon, null); y.push(p.lat, p.lat, null); z.push(0, p.n, null);
-      }
+  function outlineTraces(g) {
+    var x = [], y = [], zE = [], zGeoid = [], zGround = [];
+    g.outline.forEach(function (p) {
+      var n = geoidAt(g, p[0], p[1]);
+      if (n === null) return;
+      x.push(p[0]); y.push(p[1]); zE.push(LIFT);
+      zGeoid.push(n + LIFT);
+      zGround.push(n + groundMaxAt(g, p[0], p[1]) / RELIEF + LIFT);
     });
+    state.outlineZ = { geoid: zGeoid, ground: zGround };
+    var base = { type: 'scatter3d', mode: 'lines', x: x, y: y, hoverinfo: 'skip', showlegend: false };
+    return [
+      Object.assign({}, base, { z: zE, line: { color: 'rgba(232,235,244,0.4)', width: 2 } }),
+      Object.assign({}, base, { z: state.groundOn ? zGround : zGeoid, line: { color: '#f4f6fb', width: 3.5 } })
+    ];
+  }
+
+  // Vertical lines ellipsoid → geoid, about every 0.2° along the outline
+  function curtainTrace(g) {
+    var x = [], y = [], z = [], o = g.outline;
+    for (var k = 0; k < o.length - 1; k++) {
+      var a = o[k], b = o[k + 1];
+      var steps = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.2));
+      for (var s = 0; s < steps; s++) {
+        var lon = a[0] + (b[0] - a[0]) * s / steps, lat = a[1] + (b[1] - a[1]) * s / steps;
+        var n = geoidAt(g, lon, lat);
+        if (n === null) continue;
+        x.push(lon, lon, null); y.push(lat, lat, null); z.push(0, n, null);
+      }
+    }
     return { type: 'scatter3d', mode: 'lines', x: x, y: y, z: z, line: { color: 'rgba(239,71,111,0.55)', width: 2 }, hoverinfo: 'skip', showlegend: false };
   }
 
@@ -215,11 +226,11 @@
   }
 
   function aspect() {
-    var g = state.grid;
-    var midLat = (g.Y[0] + g.Y[g.Y.length - 1]) / 2 * Math.PI / 180;
-    var kmX = (g.X[g.X.length - 1] - g.X[0]) * 111.32 * Math.cos(midLat);
-    var kmY = (g.Y[g.Y.length - 1] - g.Y[0]) * 110.57;
-    var kmZ = state.zTop / 1000 * state.exag;
+    var g = state.g;
+    var midLat = (g.Y[0] + g.Y[g.ny - 1]) / 2 * Math.PI / 180;
+    var kmX = (g.X[g.nx - 1] - g.X[0]) * 111.32 * Math.cos(midLat);
+    var kmY = (g.Y[g.ny - 1] - g.Y[0]) * 110.57;
+    var kmZ = zTop() / 1000 * state.exag;
     var m = Math.max(kmX, kmY);
     return { x: kmX / m, y: kmY / m, z: kmZ / m };
   }
@@ -239,7 +250,7 @@
         camera: CAMERAS.perspective,
         xaxis: axis('Longitude', { ticksuffix: '°', dtick: 1 }),
         yaxis: axis('Latitude', { ticksuffix: '°', dtick: 1 }),
-        zaxis: axis('Height above ellipsoid (m)', { range: [0, state.zTop], dtick: 10 })
+        zaxis: axis('Height above ellipsoid (m)', { range: [0, zTop()], dtick: 10 })
       }
     };
   }
@@ -248,27 +259,46 @@
   function fmtLat(v) { return Math.abs(v).toFixed(4) + '° ' + (v >= 0 ? 'N' : 'S'); }
   function fmtLon(v) { return Math.abs(v).toFixed(4) + '° ' + (v >= 0 ? 'E' : 'W'); }
 
-  function setPin(lon, lat, name) {
-    var n = bilinearZ(state.grid, lon, lat);
-    if (n === null) return;
-    state.pin = { lon: lon, lat: lat, n: n, name: name || '' };
-    // Segment ellipsoid → geoid, then a gap, then a label point floating above the geoid so the surface can't hide it
-    var labelZ = n + state.zTop * 0.12;
+  function drawProbe() {
+    var p = state.pin;
+    if (!p) return;
+    var top = p.n + (state.groundOn && p.h !== null ? p.h / RELIEF : 0);
+    var labelZ = top + zTop() * 0.08;
+    // Segment ellipsoid → geoid, a gap, then a label point floating above the surfaces
     Plotly.restyle(plotEl, {
-      x: [[lon, lon, null, lon]], y: [[lat, lat, null, lat]], z: [[LIFT, n + LIFT, null, labelZ]],
-      text: [['', '', '', 'N = ' + n.toFixed(2) + ' m']]
+      x: [[p.lon, p.lon, null, p.lon]], y: [[p.lat, p.lat, null, p.lat]], z: [[LIFT, p.n + LIFT, null, labelZ]],
+      text: [['', '', '', 'N = ' + p.n.toFixed(2) + ' m']]
     }, [T.probe]);
+  }
+
+  function setPin(lon, lat, name) {
+    var g = state.g, n = geoidAt(g, lon, lat);
+    if (n === null) return;
+    var h = groundAt(g, lon, lat);
+    state.pin = { lon: lon, lat: lat, n: n, h: h, name: name || '' };
+    drawProbe();
+
     $('#pinName').textContent = state.pin.name;
     $('#pinLat').textContent = fmtLat(lat);
     $('#pinLon').textContent = fmtLon(lon);
     $('#pinN').textContent = n.toFixed(2) + ' m';
+    var onLand = h !== null;
+    $('#pinGroundRow').hidden = !onLand;
+    $('#pinGroundVal').hidden = !onLand;
+    if (onLand) {
+      $('#pinGroundVal').textContent = Math.round(h).toLocaleString('en-US') + ' m';
+      $('#hIn').value = (h + n).toFixed(1);   // what a GPS standing on this ground would read
+    }
+    $('#hHint').textContent = onLand
+      ? 'Prefilled with H + N: what a GPS on this ground would read.'
+      : 'Over the sea: type any GPS height.';
     updateConverter();
   }
 
   function updateConverter() {
     var out = $('#hOut'), h = parseFloat($('#hIn').value);
     if (!state.pin || isNaN(h)) { out.textContent = '—'; return; }
-    out.textContent = (h - state.pin.n).toFixed(2) + ' m';
+    out.textContent = (h - state.pin.n).toFixed(1) + ' m';
   }
 
   // ---------- Controls ----------
@@ -279,12 +309,20 @@
   }
   function sliderFromExag(e) { return Math.round(1000 * Math.log(e / EXAG_MIN) / Math.log(EXAG_MAX / EXAG_MIN)); }
 
+  function setGround(on) {
+    state.groundOn = on;
+    Plotly.restyle(plotEl, { z: [on ? state.outlineZ.ground : state.outlineZ.geoid] }, [T.outlineTop]);
+    Plotly.relayout(plotEl, { 'scene.zaxis.range': [0, zTop()], 'scene.aspectratio': aspect() });
+    drawProbe();
+  }
+
   function bindControls() {
     $all('.chip[data-layer]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var on = btn.getAttribute('aria-pressed') !== 'true';
         btn.setAttribute('aria-pressed', String(on));
         Plotly.restyle(plotEl, { visible: on }, LAYERS[btn.dataset.layer]);
+        if (btn.dataset.layer === 'ground') setGround(on);
       });
     });
 
@@ -312,12 +350,12 @@
     $('#hIn').addEventListener('input', updateConverter);
 
     // Pin on a click, not at the start of a drag. Plotly's 3D plotly_click fires on every frame
-    // the button is down, so a rotate that starts on the geoid would move the pin. Instead,
-    // remember the hovered geoid point and pin it only on a short press that didn't move.
+    // the button is down, so a rotate that starts on a surface would move the pin. Instead,
+    // remember the hovered point and pin it only on a short press that didn't move.
     var hovered = null, down = null;
     plotEl.on('plotly_hover', function (ev) {
       var p = ev && ev.points && ev.points[0];
-      hovered = p && p.curveNumber === T.geoid ? { x: p.x, y: p.y } : null;
+      hovered = p && (p.curveNumber === T.geoid || p.curveNumber === T.ground) ? { x: p.x, y: p.y } : null;
     });
     plotEl.on('plotly_unhover', function () { hovered = null; });
     plotEl.addEventListener('pointerdown', function (e) {
@@ -334,57 +372,38 @@
 
   // ---------- Boot ----------
   function fail(msg) {
-    var box = $('#loading');
-    box.classList.add('error');
+    $('#loading').classList.add('error');
     $('#loadingText').innerHTML = msg;
-  }
-
-  function fetchText(url) {
-    return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ': HTTP ' + r.status); return r.text(); });
-  }
-  function fetchJSON(url) {
-    return fetch(url).then(function (r) { if (!r.ok) throw new Error(url + ': HTTP ' + r.status); return r.json(); });
   }
 
   function boot() {
     if (!window.Plotly) { fail('Couldn’t load Plotly from the CDN. Check your connection and reload.'); return; }
 
-    var borders = fetchJSON(BORDER_URL).catch(function (e) { console.warn('Border overlay skipped:', e); return null; });
+    dataPromise.then(function (d) {
+      var g = state.g = toGrid(d), s = g.stats;
+      $('#nMin').textContent = s.nMin.toFixed(1);
+      $('#nMax').textContent = s.nMax.toFixed(1) + ' m';
+      $('#gridInfo').textContent = g.ny + ' × ' + g.nx + ' nodes at ' + g.step + '° spacing (about 2.8 km); N ranges from ' +
+        s.nMin.toFixed(1) + ' to ' + s.nMax.toFixed(1) + ' m.';
 
-    fetchText(DAT_URL).then(function (text) {
-      var parsed = parseDAT(text);
-      if (!parsed.pts.length) throw new Error('no valid rows in ' + DAT_URL);
-      var grid = detectGrid(parsed.pts);
-      if (!grid) throw new Error(DAT_URL + ' is not a complete regular grid');
-      state.grid = grid;
-      state.zTop = Math.ceil((grid.max + 2) / 10) * 10;
+      var traces = [];
+      traces[T.ellipsoid] = ellipsoidTrace(g);
+      traces[T.geoid] = geoidTrace(g);
+      traces[T.ground] = groundTrace(g);
+      var outlines = outlineTraces(g);
+      traces[T.outlineE] = outlines[0];
+      traces[T.outlineTop] = outlines[1];
+      traces[T.curtain] = curtainTrace(g);
+      traces[T.probe] = probeTrace();
 
-      $('#nMin').textContent = grid.min.toFixed(1);
-      $('#nMax').textContent = grid.max.toFixed(1) + ' m';
-      var step = grid.X.length > 1 ? (grid.X[1] - grid.X[0]) : 0;
-      $('#gridInfo').textContent = 'Loaded ' + grid.Y.length + ' × ' + grid.X.length + ' nodes at ' + roundN(step, 4) +
-        '° spacing; N ranges from ' + grid.min.toFixed(1) + ' to ' + grid.max.toFixed(1) + ' m.' +
-        (parsed.bad ? ' Skipped ' + parsed.bad + ' malformed line(s).' : '');
-
-      return borders.then(function (gj) {
-        var runs = borderRuns(gj, grid);
-        var traces = [];
-        traces[T.ellipsoid] = ellipsoidTrace(grid);
-        traces[T.geoid] = geoidTrace(grid);
-        traces[T.borderE] = lineTrace(runs, function () { return LIFT; }, { color: 'rgba(232,235,244,0.4)', width: 2 });
-        traces[T.borderG] = lineTrace(runs, function (p) { return p.n + LIFT; }, { color: '#f4f6fb', width: 3.5 });
-        traces[T.curtain] = curtainTrace(runs);
-        traces[T.probe] = probeTrace();
-
-        return Plotly.newPlot(plotEl, traces, layout(), { responsive: true, displayModeBar: false, scrollZoom: true });
-      });
+      return Plotly.newPlot(plotEl, traces, layout(), { responsive: true, displayModeBar: false, scrollZoom: true });
     }).then(function () {
       bindControls();
       setPin(DEFAULT_PIN.lon, DEFAULT_PIN.lat, DEFAULT_PIN.name);
       $('#loading').classList.add('done');
     }).catch(function (err) {
       console.error(err);
-      fail('Couldn’t load the geoid grid (' + String(err.message).replace(/</g, '&lt;') + ').<br>Serve this folder over HTTP, for example <code>python -m http.server</code>, rather than opening the file directly.');
+      fail('Couldn’t load the data (' + String(err.message).replace(/</g, '&lt;') + ').<br>Serve this folder over HTTP, for example <code>python -m http.server</code>, rather than opening the file directly.');
     });
   }
 

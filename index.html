@@ -4,47 +4,46 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Geoid vs Ellipsoid · Portugal</title>
-  <meta name="description" content="The GeodPT08 geoid and the GRS80 ellipsoid over mainland Portugal, drawn together in 3D." />
+  <meta name="description" content="Interactive 3D view of mainland Portugal's terrain, the GeodPT08 geoid (mean sea level) and the GRS80 ellipsoid used by GPS, and the 45–58 m gap between them." />
+  <meta name="theme-color" content="#0a0e17" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="preload" href="data/portugal.json" as="fetch" crossorigin="anonymous" />
   <link rel="stylesheet" href="styles.css" />
-  <!-- Plotly 2.x pinned (avoids the v1 deprecation warning) -->
-  <script src="https://cdn.plot.ly/plotly-2.30.0.min.js" defer></script>
+  <!-- Plotly 2.x pinned, 3D-only bundle (surface + scatter3d), less than half the full build -->
+  <script src="https://cdn.plot.ly/plotly-gl3d-2.30.0.min.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
-        <rect x="0.5" y="0.5" width="39" height="39" rx="10" fill="#151c33" stroke="#2a3456"/>
-        <path d="M6,25 Q20,21 34,25" fill="none" stroke="#b48cff" stroke-width="2" stroke-dasharray="3 2.5"/>
-        <path d="M6,19 C11,14 15,22 20,17 C25,12 29,18 34,14" fill="none" stroke="#4cc9f0" stroke-width="2.2" stroke-linecap="round"/>
-        <line x1="20" y1="17.5" x2="20" y2="23" stroke="#ef476f" stroke-width="2"/>
-      </svg>
+      <img class="brand-mark" src="icon.svg" alt="" width="38" height="38" />
       <div>
         <h1>Geoid vs ellipsoid: Portugal</h1>
-        <p>GeodPT08 geoid model, shown in 3D against its reference ellipsoid</p>
+        <p>Terrain, geoid and ellipsoid in 3D: why GPS heights differ from sea-level heights</p>
       </div>
     </div>
-    <p class="credit">Geoid: GeodPT08 (DGT) · Boundaries: © EuroGeographics</p>
+    <p class="credit">Geoid: GeodPT08 (DGT) · Terrain: SRTM (NASA) · Outline: © EuroGeographics</p>
   </header>
 
   <main class="app">
     <!-- ============ 3D viewer ============ -->
-    <section class="viewer" aria-label="3D view of the geoid and the ellipsoid">
+    <section class="viewer" aria-label="3D view of the terrain, the geoid and the ellipsoid">
       <div class="stage">
         <div id="plot"></div>
         <div class="loading" id="loading" role="status">
           <div class="spinner" aria-hidden="true"></div>
-          <p id="loadingText">Loading the geoid grid…</p>
+          <p id="loadingText">Loading the geoid and terrain…</p>
         </div>
       </div>
 
       <div class="ov ov-layers panel">
         <div class="panel-label">Layers</div>
         <div class="chips" role="group" aria-label="Layers">
+          <button class="chip" type="button" data-layer="ground" aria-pressed="true" style="--c:var(--ground)" title="Real terrain, relief shown 30× smaller"><span class="sw"></span>Ground</button>
           <button class="chip" type="button" data-layer="geoid" aria-pressed="true" style="--c:var(--geoid)"><span class="sw"></span>Geoid</button>
           <button class="chip" type="button" data-layer="ellipsoid" aria-pressed="true" style="--c:var(--ellipsoid)"><span class="sw"></span>Ellipsoid</button>
           <button class="chip" type="button" data-layer="gap" aria-pressed="true" style="--c:var(--n)"><span class="sw"></span>Gap N</button>
-          <button class="chip" type="button" data-layer="borders" aria-pressed="true" style="--c:var(--ink)"><span class="sw"></span>Borders</button>
+          <button class="chip" type="button" data-layer="borders" aria-pressed="true" style="--c:var(--ink)"><span class="sw"></span>Outline</button>
         </div>
         <div class="scale" aria-label="Geoid colour scale">
           <span id="nMin">45</span>
@@ -58,6 +57,7 @@
         <dl class="readout">
           <dt>Latitude</dt><dd id="pinLat">—</dd>
           <dt>Longitude</dt><dd id="pinLon">—</dd>
+          <dt id="pinGroundRow"><b class="c-H">H</b> ground above sea level</dt><dd class="c-H" id="pinGroundVal">—</dd>
           <dt><b class="c-n">N</b> geoid above ellipsoid</dt><dd class="c-n" id="pinN">—</dd>
         </dl>
         <div class="converter">
@@ -65,11 +65,11 @@
           <div class="field"><input id="hIn" type="number" inputmode="decimal" step="0.1" value="150" /><span>m</span></div>
           <div class="result"><b class="c-H">H</b> = <b class="c-h">h</b> − <b class="c-n">N</b> = <output id="hOut" for="hIn">—</output></div>
         </div>
-        <p class="hint">Click anywhere on the geoid to move the pin.</p>
+        <p class="hint"><span id="hHint"></span> Click the ground or the geoid to move the pin.</p>
       </div>
 
       <div class="ov ov-exag panel">
-        <label class="panel-label" for="exag">Vertical exaggeration <output id="exagOut">×4,000</output></label>
+        <label class="panel-label" for="exag">Vertical exaggeration <output id="exagOut">×3,000</output></label>
         <input id="exag" type="range" min="0" max="1000" step="1" />
         <p class="hint">At true scale (×1) the 50 m gap would be thinner than a line.</p>
       </div>
@@ -88,13 +88,14 @@
     <aside class="guide" aria-label="Guide">
       <section>
         <h2>What you're looking at</h2>
-        <p>Two reference surfaces over mainland Portugal, drawn in the same 3D space:</p>
+        <p>Mainland Portugal&rsquo;s ground and the two surfaces heights are measured from, drawn in the same 3D space:</p>
         <ul class="legend">
+          <li><span class="sw" style="--c:var(--ground)"></span><div><b class="c-ground">Ground</b>: the real terrain, sitting on the geoid. Its relief is shrunk 30&times; so that mountains of nearly 2,000&nbsp;m fit beside the 50&nbsp;m gap.</div></li>
           <li><span class="sw" style="--c:var(--ellipsoid)"></span><div><b class="c-ellipsoid">Ellipsoid</b>: the flat purple plane. Height zero for GPS.</div></li>
-          <li><span class="sw" style="--c:var(--geoid)"></span><div><b class="c-geoid">Geoid</b>: the blue surface floating above it. Height zero for sea level.</div></li>
+          <li><span class="sw" style="--c:var(--geoid)"></span><div><b class="c-geoid">Geoid</b>: the blue surface floating above it, visible over the sea and Spain. Height zero for sea level.</div></li>
           <li><span class="sw" style="--c:var(--n)"></span><div><b class="c-n">N</b>: the vertical gap between them, drawn in red along the coast and at the pin.</div></li>
         </ul>
-        <p class="muted">Heights are stretched thousands of times. Drag to rotate, scroll to zoom, and switch to <em>Side</em> to see the gap edge-on, like the diagram below.</p>
+        <p class="muted">All heights are also stretched thousands of times. Drag to rotate, scroll to zoom, and switch to <em>Side</em> to see the gap edge-on, like the diagram below.</p>
       </section>
 
       <section>
@@ -163,10 +164,11 @@
       <section>
         <h2>About the data</h2>
         <ul class="terms">
-          <li><code>GeodPT08.dat</code>: the Portuguese geoid model from the Direção-Geral do Território (DGT), a regular grid of <code>lon lat N</code> rows. <span id="gridInfo"></span></li>
-          <li><code>CNTR_BN_20M_2024_4326.geojson</code>: GISCO country boundary lines (1:20 million, WGS84), © EuroGeographics. Madeira and the Azores are left out (longitude &lt; −12°).</li>
+          <li><b>Geoid</b>: GeodPT08, the Portuguese geoid model from the Direção-Geral do Território (DGT). <span id="gridInfo"></span></li>
+          <li><b>Terrain</b>: SRTM 90&nbsp;m elevation (NASA, public domain) via OpenTopoData, sampled at each grid node, so peaks are smoothed a little.</li>
+          <li><b>Outline</b>: GISCO country polygon (1:20 million), © EuroGeographics. Madeira and the Azores are left out.</li>
         </ul>
-        <p class="muted">Both files sit next to <code>index.html</code>. Serve the folder over HTTP (for example <code>python -m http.server</code>); opening the file directly blocks the data from loading.</p>
+        <p class="muted">All three are merged into one small file, <code>data/portugal.json</code>, by <code>tools/build_data.py</code>. Serve the folder over HTTP (for example <code>python -m http.server</code>); opening the file directly blocks the data from loading.</p>
       </section>
     </aside>
   </main>
