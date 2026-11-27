@@ -3,8 +3,8 @@
 
   // ---------- Config ----------
   var DATA_URL = 'data/portugal.json';  // built by tools/build_data.py
-  var LIFT = 0.4;                       // metres; keeps lines off the surfaces (z-fighting)
-  var LIFT_GROUND = 2;                  // same, for lines on the ground
+  var GAP_AMP = 1000;                   // "Gap N ×1000": the geoid is drawn 1,000 times higher
+  var LIFT_GROUND = 2;                  // metres; keeps lines off the ground (z-fighting)
 
   var C = {
     geoid: '#4cc9f0', ellipsoid: '#b48cff', n: '#ef476f', ground: '#7fb069',
@@ -19,8 +19,8 @@
 
   var DEFAULT_PIN = { lon: -9.1393, lat: 38.7223, name: 'Lisbon' };
 
-  var T = { ellipsoid: 0, geoid: 1, ground: 2, outlineE: 3, outlineTop: 4, curtain: 5, probe: 6 };
-  var LAYERS = { geoid: [T.geoid], ellipsoid: [T.ellipsoid], ground: [T.ground], gap: [T.curtain], borders: [T.outlineE, T.outlineTop] };
+  var T = { ellipsoid: 0, geoid: 1, ground: 2, outlineE: 3, outlineTop: 4, curtain: 5, probe: 6, ellipsoidGrid: 7 };
+  var LAYERS = { geoid: [T.geoid], ellipsoid: [T.ellipsoid, T.ellipsoidGrid], ground: [T.ground], gap: [T.curtain], borders: [T.outlineE, T.outlineTop] };
 
   // All perspective: switching scene.camera.projection at runtime corrupts the WebGL scene
   // in Plotly 2.30 (surfaces vanish, axes garble), so the presets only move the eye.
@@ -31,7 +31,8 @@
   };
 
   // g: grid ({lon0, lat0, step, nx, ny, N: Float32Array, H: Int16Array (-1 = no ground), X, Y, stats})
-  var state = { g: null, groundOn: true, pin: null, outlineZ: null };
+  // amp: true while the gap N is drawn ×GAP_AMP (heights above the geoid always stay 1:1)
+  var state = { g: null, groundOn: true, geoidOn: true, amp: true, pin: null, samples: null, zCache: {} };
 
   function $(sel) { return document.querySelector(sel); }
   function $all(sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); }
@@ -124,20 +125,21 @@
     return Math.max(0, H[k], H[k + 1], H[k + g.nx], H[k + g.nx + 1]);
   }
 
+  // ---------- Vertical scale ----------
+  function gapScale() { return state.amp ? GAP_AMP : 1; }
+  // Lines drawn on the geoid sit this far above it. Amplified, the geoid's triangles bend
+  // away from the bilinear line samples by up to a few metres, so the margin grows with it.
+  function lift() { return state.amp ? 12 : 0.4; }
+
   function zTop() {
     var s = state.g.stats;
-    // Ground on: true heights up to ~1,940 m. Ground off: axis zooms onto the 45-58 m geoid.
+    // Amplified: one fixed range (~61 km), so toggling the ground doesn't rescale the scene.
+    if (state.amp) return Math.ceil((s.nMax * GAP_AMP + s.hMax + 500) / 1000) * 1000;
+    // True scale: up to ~1,940 m with the ground, or zoomed onto the 45-58 m geoid without it.
     return state.groundOn ? Math.ceil((s.nMax + s.hMax + 20) / 100) * 100 : Math.ceil((s.nMax + 2) / 10) * 10;
   }
 
   // ---------- Traces ----------
-  function stepped(a, b, s) {
-    var out = [a];
-    for (var v = Math.ceil(a / s) * s; v < b - 1e-9; v += s) { if (v > a + 1e-9) out.push(+v.toFixed(6)); }
-    out.push(b);
-    return out;
-  }
-
   function rows(g, fn) {
     var Z = new Array(g.ny);
     for (var j = 0; j < g.ny; j++) {
@@ -148,58 +150,39 @@
     return Z;
   }
 
-  function ellipsoidTrace(g) {
-    var x0 = g.X[0], x1 = g.X[g.nx - 1], y0 = g.Y[0], y1 = g.Y[g.ny - 1];
-    var ex = stepped(x0, x1, 0.5), ey = stepped(y0, y1, 0.5);
-    var ez = ey.map(function () { return ex.map(function () { return 0; }); });
-    var gridLine = { show: true, size: 0.5, color: 'rgba(206,180,255,0.55)', width: 1, highlight: false };
-    return {
-      type: 'surface', name: 'Ellipsoid', x: ex, y: ey, z: ez, surfacecolor: ez,
-      colorscale: [[0, C.ellipsoid], [1, C.ellipsoid]], showscale: false, opacity: 0.32,
-      lighting: { ambient: 1, diffuse: 0, specular: 0, fresnel: 0 },
-      contours: {
-        x: Object.assign({ start: Math.ceil(x0 * 2) / 2, end: x1 }, gridLine),
-        y: Object.assign({ start: Math.ceil(y0 * 2) / 2, end: y1 }, gridLine),
-        z: { highlight: false }
-      },
-      hoverinfo: 'skip'
-    };
+  // Same, but column-major: [i][j]. Plotly 2.30 looks up a surface's %{text} as text[x][y],
+  // although z is z[y][x], so hover text has to be passed transposed.
+  function cols(g, fn) {
+    var A = new Array(g.nx);
+    for (var i = 0; i < g.nx; i++) {
+      var col = new Array(g.ny);
+      for (var j = 0; j < g.ny; j++) col[j] = fn(j * g.nx + i);
+      A[i] = col;
+    }
+    return A;
   }
 
-  function geoidTrace(g) {
-    var s = g.stats;
-    return {
-      type: 'surface', name: 'Geoid', x: g.X, y: g.Y, z: rows(g, function (k) { return g.N[k]; }),
-      colorscale: GEOID_SCALE, cmin: s.nMin, cmax: s.nMax, showscale: false, opacity: 1,
-      lighting: { ambient: 0.72, diffuse: 0.6, specular: 0.08, roughness: 0.9, fresnel: 0.1 },
-      lightposition: { x: -1e5, y: -1e5, z: 2e5 },
-      contours: {
-        z: { show: true, start: Math.floor(s.nMin), end: Math.ceil(s.nMax), size: 1, color: 'rgba(8,16,36,0.35)', width: 1,
-             highlight: true, highlightcolor: 'rgba(255,255,255,0.85)', highlightwidth: 2 },
-        x: { highlight: false }, y: { highlight: false }
-      },
-      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>N = %{z:.2f} m</b><extra>Geoid</extra>'
-    };
-  }
-
-  // Cells outside Portugal are pushed far below the height axis, where Plotly clips them.
-  // Not nulls: they break 3D surface picking (no hover). Not an opacityscale either: that
-  // sends the whole surface through the transparent pass, which doesn't depth-sort, so far
-  // peaks were drawn over near ones.
-  // (Surface hovertemplates only expose x/y/z, so the exact H is shown in the pin readout.)
-  var CLIPPED = -1000;
-  function groundTrace(g) {
-    var z = rows(g, function (k) { return g.H[k] < 0 ? CLIPPED : g.N[k] + g.H[k]; });
-    var s = g.stats;
-    var color = rows(g, function (k) { return g.H[k] < 0 ? s.hMin : g.H[k]; });
-    return {
-      type: 'surface', name: 'Ground', x: g.X, y: g.Y, z: z, surfacecolor: color,
-      colorscale: groundScale(s.hMin, s.hMax), cmin: s.hMin, cmax: s.hMax, showscale: false, opacity: 1,
-      lighting: { ambient: 0.6, diffuse: 0.8, specular: 0.05, roughness: 1, fresnel: 0.05 },
-      lightposition: { x: -1e5, y: -1e5, z: 2e5 },
-      contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
-      hovertemplate: 'lat %{y:.3f}° · lon %{x:.3f}°<br><b>Ground</b>: click to read its height<extra></extra>'
-    };
+  // Points along the outline, sampled once: dense ones for the outline lines and sparse ones
+  // (about every 0.2°) for the red ellipsoid → geoid "curtain".
+  function sampleOutline(g) {
+    var line = { x: [], y: [], n: [], top: [] }, curtain = { x: [], y: [], n: [] };
+    densify(g.outline, g.step / 2).forEach(function (p) {
+      var n = geoidAt(g, p[0], p[1]);
+      if (n === null) return;
+      line.x.push(p[0]); line.y.push(p[1]); line.n.push(n); line.top.push(groundMaxAt(g, p[0], p[1]));
+    });
+    var o = g.outline;
+    for (var k = 0; k < o.length - 1; k++) {
+      var a = o[k], b = o[k + 1];
+      var steps = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.2));
+      for (var s = 0; s < steps; s++) {
+        var lon = a[0] + (b[0] - a[0]) * s / steps, lat = a[1] + (b[1] - a[1]) * s / steps;
+        var n = geoidAt(g, lon, lat);
+        if (n === null) continue;
+        curtain.x.push(lon, lon, null); curtain.y.push(lat, lat, null); curtain.n.push(n);
+      }
+    }
+    return { line: line, curtain: curtain };
   }
 
   // Split the coarse outline into steps no longer than `maxStep` degrees, so each sample
@@ -215,42 +198,135 @@
     return out;
   }
 
-  function outlineTraces(g) {
-    var x = [], y = [], zE = [], zGeoid = [], zGround = [];
-    densify(g.outline, g.step / 2).forEach(function (p) {
-      var n = geoidAt(g, p[0], p[1]);
-      if (n === null) return;
-      x.push(p[0]); y.push(p[1]); zE.push(LIFT);
-      zGeoid.push(n + LIFT);
-      zGround.push(n + groundMaxAt(g, p[0], p[1]) + LIFT_GROUND);
-    });
-    state.outlineZ = { geoid: zGeoid, ground: zGround };
-    var base = { type: 'scatter3d', mode: 'lines', x: x, y: y, hoverinfo: 'skip', showlegend: false };
+  // Every height array that depends on the gap scale, built once per scale and reused.
+  function heights() {
+    var f = gapScale();
+    if (state.zCache[f]) return state.zCache[f];
+    var g = state.g, L = state.samples.line, cu = state.samples.curtain, up = lift();
+    var z = {
+      geoid: rows(g, function (k) { return g.N[k] * f; }),
+      lineGeoid: L.n.map(function (n) { return n * f + up; }),
+      lineGround: L.n.map(function (n, k) { return n * f + L.top[k] + LIFT_GROUND + (up - 0.4); }),
+      curtain: []
+    };
+    cu.n.forEach(function (n) { z.curtain.push(0, n * f, null); });
+    return (state.zCache[f] = z);
+  }
+
+  // Ground heights. Cells outside Portugal have to vanish without nulls (they break 3D surface
+  // picking, so no hover) or an opacityscale (that sends the surface through the transparent
+  // pass, which doesn't depth-sort, so far peaks were drawn over near ones):
+  //  - normally they go far below the height axis, where Plotly clips them. The coast then
+  //    drops in a near-vertical wall down to the ellipsoid: invisible at true scale (~50 m),
+  //    but a 45 km cliff with the gap amplified.
+  //  - so with the gap amplified and the geoid shown, they sit just under the opaque geoid
+  //    instead, which hides them, and the coast slopes down to sea level as it should.
+  var CLIPPED = -1e6, UNDER_GEOID = 300;
+  function groundZ() {
+    var f = gapScale(), under = state.amp && state.geoidOn, key = f + (under ? 'u' : 'c');
+    if (state.zCache[key]) return state.zCache[key];
+    var g = state.g;
+    return (state.zCache[key] = rows(g, function (k) {
+      if (g.H[k] >= 0) return g.N[k] * f + g.H[k];
+      return under ? g.N[k] * f - UNDER_GEOID : CLIPPED;
+    }));
+  }
+
+  function contoursZ() {
+    var s = state.g.stats, f = gapScale();
+    return { show: true, start: Math.floor(s.nMin) * f, end: Math.ceil(s.nMax) * f, size: f, color: 'rgba(8,16,36,0.35)', width: 1, highlight: false };
+  }
+
+  // A flat 2×2 plane, with its 0.5° grid drawn as plain lines. Surface contours would need a
+  // fine, evenly spaced grid: Plotly resamples anything else on every redraw (an unevenly
+  // spaced version of this plane alone took ~450 ms each time).
+  function ellipsoidTrace(g) {
+    var x0 = g.X[0], x1 = g.X[g.nx - 1], y0 = g.Y[0], y1 = g.Y[g.ny - 1], ez = [[0, 0], [0, 0]];
+    return {
+      type: 'surface', name: 'Ellipsoid', x: [x0, x1], y: [y0, y1], z: ez, surfacecolor: ez,
+      colorscale: [[0, C.ellipsoid], [1, C.ellipsoid]], showscale: false, opacity: 0.32,
+      lighting: { ambient: 1, diffuse: 0, specular: 0, fresnel: 0 },
+      contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
+      hoverinfo: 'skip'
+    };
+  }
+
+  function ellipsoidGridTrace(g) {
+    var x0 = g.X[0], x1 = g.X[g.nx - 1], y0 = g.Y[0], y1 = g.Y[g.ny - 1], x = [], y = [], z = [];
+    for (var lon = Math.ceil(x0 * 2) / 2; lon <= x1; lon += 0.5) { x.push(lon, lon, null); y.push(y0, y1, null); z.push(0.4, 0.4, null); }
+    for (var lat = Math.ceil(y0 * 2) / 2; lat <= y1; lat += 0.5) { x.push(x0, x1, null); y.push(lat, lat, null); z.push(0.4, 0.4, null); }
+    return { type: 'scatter3d', mode: 'lines', x: x, y: y, z: z, line: { color: 'rgba(206,180,255,0.55)', width: 1 }, hoverinfo: 'skip', showlegend: false };
+  }
+
+  // Hover text. z may be amplified, so the true N comes from `text`. The ground's sea cells
+  // (hidden under the geoid) can win the hover there, so they carry the geoid's text too.
+  var HOVER = 'lat %{y:.3f}° · lon %{x:.3f}°<br>%{text}<extra></extra>';
+  function geoidLabel(g, k) { return '<b>Geoid</b>: N = ' + g.N[k].toFixed(2) + ' m'; }
+
+  function geoidTrace(g) {
+    var s = g.stats;
+    // Coloured by the true N, so the colours mean the same at either scale
+    return {
+      type: 'surface', name: 'Geoid', x: g.X, y: g.Y, z: heights().geoid,
+      surfacecolor: rows(g, function (k) { return g.N[k]; }),
+      text: cols(g, function (k) { return geoidLabel(g, k); }),
+      colorscale: GEOID_SCALE, cmin: s.nMin, cmax: s.nMax, showscale: false, opacity: 1,
+      lighting: { ambient: 0.72, diffuse: 0.6, specular: 0.08, roughness: 0.9, fresnel: 0.1 },
+      lightposition: { x: -1e5, y: -1e5, z: 2e5 },
+      contours: { z: contoursZ(), x: { highlight: false }, y: { highlight: false } },
+      hovertemplate: HOVER
+    };
+  }
+
+  // (Text for 37k cells is already plenty, so the exact H is left to the pin readout.)
+  function groundTrace(g) {
+    var s = g.stats;
+    var color = rows(g, function (k) { return g.H[k] < 0 ? s.hMin : g.H[k]; });
+    return {
+      type: 'surface', name: 'Ground', x: g.X, y: g.Y, z: groundZ(), surfacecolor: color,
+      colorscale: groundScale(s.hMin, s.hMax), cmin: s.hMin, cmax: s.hMax, showscale: false, opacity: 1,
+      lighting: { ambient: 0.6, diffuse: 0.8, specular: 0.05, roughness: 1, fresnel: 0.05 },
+      lightposition: { x: -1e5, y: -1e5, z: 2e5 },
+      contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
+      text: cols(g, function (k) { return g.H[k] < 0 ? geoidLabel(g, k) : '<b>Ground</b>: click to read its height'; }),
+      hovertemplate: HOVER
+    };
+  }
+
+  function outlineTop() { var z = heights(); return state.groundOn ? z.lineGround : z.lineGeoid; }
+
+  function outlineTraces() {
+    var L = state.samples.line;
+    var base = { type: 'scatter3d', mode: 'lines', x: L.x, y: L.y, hoverinfo: 'skip', showlegend: false };
     return [
-      Object.assign({}, base, { z: zE, line: { color: 'rgba(232,235,244,0.4)', width: 2 } }),
-      Object.assign({}, base, { z: state.groundOn ? zGround : zGeoid, line: { color: '#f4f6fb', width: 3.5 } })
+      Object.assign({}, base, { z: L.x.map(function () { return 0.4; }), line: { color: 'rgba(232,235,244,0.4)', width: 2 } }),
+      Object.assign({}, base, { z: outlineTop(), line: { color: '#f4f6fb', width: 3.5 } })
     ];
   }
 
-  // Vertical lines ellipsoid → geoid, about every 0.2° along the outline
-  function curtainTrace(g) {
-    var x = [], y = [], z = [], o = g.outline;
-    for (var k = 0; k < o.length - 1; k++) {
-      var a = o[k], b = o[k + 1];
-      var steps = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.2));
-      for (var s = 0; s < steps; s++) {
-        var lon = a[0] + (b[0] - a[0]) * s / steps, lat = a[1] + (b[1] - a[1]) * s / steps;
-        var n = geoidAt(g, lon, lat);
-        if (n === null) continue;
-        x.push(lon, lon, null); y.push(lat, lat, null); z.push(0, n, null);
-      }
-    }
-    return { type: 'scatter3d', mode: 'lines', x: x, y: y, z: z, line: { color: 'rgba(239,71,111,0.55)', width: 2 }, hoverinfo: 'skip', showlegend: false };
+  // Vertical lines ellipsoid → geoid along the outline
+  function curtainTrace() {
+    var cu = state.samples.curtain;
+    return { type: 'scatter3d', mode: 'lines', x: cu.x, y: cu.y, z: heights().curtain, line: { color: 'rgba(239,71,111,0.55)', width: 2 }, hoverinfo: 'skip', showlegend: false };
+  }
+
+  // Segment ellipsoid → geoid at the pin, a gap, then a label point floating above the surfaces
+  function probeData() {
+    var p = state.pin;
+    if (!p) return { x: [[null]], y: [[null]], z: [[null]], text: [['']] };
+    var f = gapScale(), up = lift();
+    var top = p.n * f + (state.groundOn && p.h !== null ? p.h : 0);
+    var labelZ = top + zTop() * 0.08;
+    return {
+      x: [[p.lon, p.lon, null, p.lon]], y: [[p.lat, p.lat, null, p.lat]], z: [[up, p.n * f + up, null, labelZ]],
+      text: [['', '', '', 'N = ' + p.n.toFixed(2) + ' m']]
+    };
   }
 
   function probeTrace() {
+    var d = probeData();
     return {
-      type: 'scatter3d', mode: 'lines+markers+text', x: [null], y: [null], z: [null], text: [''],
+      type: 'scatter3d', mode: 'lines+markers+text', x: d.x[0], y: d.y[0], z: d.z[0], text: d.text[0],
       line: { color: C.n, width: 8 }, marker: { color: [C.ellipsoid, C.ink, C.ink, C.n], size: [4, 6, 0, 0.1], line: { width: 0 } },
       textposition: 'top center', textfont: { color: C.ink, size: 13, family: FONT },
       hoverinfo: 'skip', showlegend: false
@@ -274,7 +350,7 @@
     var kmY = (g.Y[g.ny - 1] - g.Y[0]) * 110.57;
     var kmZ = zTop() / 1000;
     var m = Math.max(kmX, kmY);
-    // True 1:1 scale: heights use the same km as the map, no vertical stretching
+    // Heights use the same km as the map, no vertical stretching (only N is scaled, when amplified)
     return { x: kmX / m, y: kmY / m, z: kmZ / m };
   }
 
@@ -293,34 +369,43 @@
         camera: CAMERAS.perspective,
         xaxis: axis('Longitude', { ticksuffix: '°', dtick: 1 }),
         yaxis: axis('Latitude', { ticksuffix: '°', dtick: 1 }),
-        // At 1:1 the box is a few pixels tall, so its ticks and title would pile up
+        // The box is only a few pixels tall, so its ticks and title would pile up
         zaxis: axis('', { range: [0, zTop()], showticklabels: false, showgrid: false })
       }
     };
+  }
+
+  function scaleLayout() { return { 'scene.zaxis.range': [0, zTop()], 'scene.aspectratio': aspect() }; }
+
+  // ---------- Redraws ----------
+  // Every Plotly call re-renders the whole WebGL scene (several hundred ms with ~75k surface
+  // vertices), so each user action makes exactly one. `changes` maps trace index → {attr: value}.
+  function redraw(changes, layoutChanges) {
+    var idx = Object.keys(changes).map(Number), upd = {};
+    idx.forEach(function (t, pos) {
+      Object.keys(changes[t]).forEach(function (a) {
+        if (!upd[a]) upd[a] = idx.map(function () { return undefined; });  // undefined = leave as is
+        upd[a][pos] = changes[t][a];
+      });
+    });
+    return Plotly.update(plotEl, upd, layoutChanges || {}, idx);
+  }
+
+  function probeChange() {
+    var d = probeData();
+    return { x: d.x[0], y: d.y[0], z: d.z[0], text: d.text[0] };
   }
 
   // ---------- Pin + converter ----------
   function fmtLat(v) { return Math.abs(v).toFixed(4) + '° ' + (v >= 0 ? 'N' : 'S'); }
   function fmtLon(v) { return Math.abs(v).toFixed(4) + '° ' + (v >= 0 ? 'E' : 'W'); }
 
-  function drawProbe() {
-    var p = state.pin;
-    if (!p) return;
-    var top = p.n + (state.groundOn && p.h !== null ? p.h : 0);
-    var labelZ = top + zTop() * 0.08;
-    // Segment ellipsoid → geoid, a gap, then a label point floating above the surfaces
-    Plotly.restyle(plotEl, {
-      x: [[p.lon, p.lon, null, p.lon]], y: [[p.lat, p.lat, null, p.lat]], z: [[LIFT, p.n + LIFT, null, labelZ]],
-      text: [['', '', '', 'N = ' + p.n.toFixed(2) + ' m']]
-    }, [T.probe]);
-  }
-
+  // Updates the state and the readout; the caller draws the probe.
   function setPin(lon, lat, name) {
     var g = state.g, n = geoidAt(g, lon, lat);
-    if (n === null) return;
+    if (n === null) return false;
     var h = groundAt(g, lon, lat);
     state.pin = { lon: lon, lat: lat, n: n, h: h, name: name || '' };
-    drawProbe();
 
     $('#pinName').textContent = state.pin.name;
     $('#pinLat').textContent = fmtLat(lat);
@@ -337,6 +422,7 @@
       ? 'Example: h is prefilled with H + N, the raw GPS height on this ground.'
       : 'Over the sea: type any raw GPS height.';
     updateConverter();
+    return true;
   }
 
   function updateConverter() {
@@ -345,12 +431,32 @@
     out.textContent = (h - state.pin.n).toFixed(1) + ' m';
   }
 
+  function updateBadge() {
+    $('#scaleBadge').textContent = state.amp
+      ? 'Heights 1:1 · gap N ×' + GAP_AMP.toLocaleString('en-US')
+      : 'Vertical scale: true 1:1 (heights not stretched)';
+  }
+
   // ---------- Controls ----------
   function setGround(on) {
     state.groundOn = on;
-    Plotly.restyle(plotEl, { z: [on ? state.outlineZ.ground : state.outlineZ.geoid] }, [T.outlineTop]);
-    Plotly.relayout(plotEl, { 'scene.zaxis.range': [0, zTop()], 'scene.aspectratio': aspect() });
-    drawProbe();
+    var c = {};
+    c[T.ground] = { visible: on };
+    c[T.outlineTop] = { z: outlineTop() };
+    c[T.probe] = probeChange();
+    redraw(c, scaleLayout());
+  }
+
+  function setAmp(on) {
+    state.amp = on;
+    var z = heights(), c = {};
+    c[T.geoid] = { z: z.geoid, 'contours.z': contoursZ() };
+    c[T.ground] = { z: groundZ() };
+    c[T.outlineTop] = { z: outlineTop() };
+    c[T.curtain] = { z: z.curtain };
+    c[T.probe] = probeChange();
+    redraw(c, scaleLayout());
+    updateBadge();
   }
 
   function bindControls() {
@@ -358,9 +464,21 @@
       btn.addEventListener('click', function () {
         var on = btn.getAttribute('aria-pressed') !== 'true';
         btn.setAttribute('aria-pressed', String(on));
-        Plotly.restyle(plotEl, { visible: on }, LAYERS[btn.dataset.layer]);
-        if (btn.dataset.layer === 'ground') setGround(on);
+        if (btn.dataset.layer === 'ground') { setGround(on); return; }
+        var c = {};
+        LAYERS[btn.dataset.layer].forEach(function (t) { c[t] = { visible: on }; });
+        if (btn.dataset.layer === 'geoid') {
+          state.geoidOn = on;
+          c[T.ground] = { z: groundZ() };   // sea cells: hidden under the geoid, or clipped
+        }
+        redraw(c);
       });
+    });
+
+    $('#ampToggle').addEventListener('click', function () {
+      var on = this.getAttribute('aria-pressed') !== 'true';
+      this.setAttribute('aria-pressed', String(on));
+      setAmp(on);
     });
 
     $all('.seg button[data-cam]').forEach(function (btn) {
@@ -369,7 +487,6 @@
         Plotly.relayout(plotEl, { 'scene.camera': CAMERAS[btn.dataset.cam] });
       });
     });
-
 
     $('#hIn').addEventListener('input', updateConverter);
 
@@ -390,7 +507,11 @@
       var still = Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5 && Date.now() - down.t < 600;
       var target = down.target || hovered;
       down = null;
-      if (still && target) setPin(target.x, target.y, '');
+      if (still && target && setPin(target.x, target.y, '')) {
+        var c = {};
+        c[T.probe] = probeChange();
+        redraw(c);
+      }
     }, true);
   }
 
@@ -405,6 +526,7 @@
 
     dataPromise.then(function (d) {
       var g = state.g = toGrid(d), s = g.stats;
+      state.samples = sampleOutline(g);
       $('#nMin').textContent = s.nMin.toFixed(1);
       $('#nMax').textContent = s.nMax.toFixed(1) + ' m';
       $('#hMin').textContent = s.hMin;
@@ -414,21 +536,24 @@
       }).join(', ') + ')';
       $('#gridInfo').textContent = g.ny + ' × ' + g.nx + ' nodes at ' + g.step + '° spacing (about 2.8 km); N ranges from ' +
         s.nMin.toFixed(1) + ' to ' + s.nMax.toFixed(1) + ' m.';
+      updateBadge();
+      // Pin first, so the probe is part of the first render instead of a second full redraw
+      setPin(DEFAULT_PIN.lon, DEFAULT_PIN.lat, DEFAULT_PIN.name);
 
       var traces = [];
       traces[T.ellipsoid] = ellipsoidTrace(g);
       traces[T.geoid] = geoidTrace(g);
       traces[T.ground] = groundTrace(g);
-      var outlines = outlineTraces(g);
+      var outlines = outlineTraces();
       traces[T.outlineE] = outlines[0];
       traces[T.outlineTop] = outlines[1];
-      traces[T.curtain] = curtainTrace(g);
+      traces[T.curtain] = curtainTrace();
       traces[T.probe] = probeTrace();
+      traces[T.ellipsoidGrid] = ellipsoidGridTrace(g);
 
       return Plotly.newPlot(plotEl, traces, layout(), { responsive: true, displayModeBar: false, scrollZoom: true });
     }).then(function () {
       bindControls();
-      setPin(DEFAULT_PIN.lon, DEFAULT_PIN.lat, DEFAULT_PIN.name);
       $('#loading').classList.add('done');
     }).catch(function (err) {
       console.error(err);

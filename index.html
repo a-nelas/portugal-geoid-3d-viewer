@@ -30,7 +30,7 @@
     <section class="viewer" aria-label="3D view of the terrain, the geoid and the ellipsoid">
       <div class="stage">
         <div id="plot"></div>
-        <p class="scale-badge">Vertical scale: true 1:1 (heights not stretched)</p>
+        <p class="scale-badge" id="scaleBadge">Heights 1:1 · gap N ×1,000</p>
         <div class="loading" id="loading" role="status">
           <div class="spinner" aria-hidden="true"></div>
           <p id="loadingText">Loading the geoid and terrain…</p>
@@ -46,6 +46,9 @@
           <button class="chip" type="button" data-layer="gap" aria-pressed="true" style="--c:var(--n)"><span class="sw"></span>Gap N</button>
           <button class="chip" type="button" data-layer="borders" aria-pressed="true" style="--c:var(--ink)"><span class="sw"></span>Outline</button>
         </div>
+        <button class="toggle" type="button" id="ampToggle" aria-pressed="true" title="Draw the geoid 1,000 times higher above the ellipsoid. Ground heights stay true.">
+          <span class="switch" aria-hidden="true"></span>Exaggerate gap <b class="c-n">N</b> ×1,000
+        </button>
         <div class="scale" aria-label="Geoid colour scale">
           <span class="scale-name c-geoid" title="Geoid height above the ellipsoid">N</span>
           <span id="nMin">45</span>
@@ -98,7 +101,7 @@
           <li><span class="sw" style="--c:var(--geoid)"></span><div><b class="c-geoid">Geoid</b>: the blue surface floating above it, visible over the sea and Spain. Height zero for sea level.</div></li>
           <li><span class="sw" style="--c:var(--n)"></span><div><b class="c-n">N</b>: the vertical gap between them, drawn in red along the coast and at the pin.</div></li>
         </ul>
-        <p class="muted">Heights are drawn at true scale, in the same units as the map. Portugal is 630&nbsp;km long and under 2&nbsp;km high, so the country really is this flat, and the 50&nbsp;m geoid gap is far too thin to see in 3D. The <em>Pinned point</em> panel reads N exactly. Drag to rotate and scroll to zoom in on the relief.</p>
+        <p class="muted">By default the gap <b class="c-n">N</b> is exaggerated 1,000 times, so the geoid floats 45&ndash;58&nbsp;km above the ellipsoid and its tilt across the country shows. The ground on top of it stays at true scale. Switch <em>Exaggerate gap</em> off to see everything at true 1:1 scale: Portugal is 630&nbsp;km long and under 2&nbsp;km high, so it really is this flat, and the 50&nbsp;m gap is far too thin to see. Either way the <em>Pinned point</em> panel reads the true N. Drag to rotate and scroll to zoom.</p>
       </section>
 
       <section>

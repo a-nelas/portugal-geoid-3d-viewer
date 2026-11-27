@@ -11,7 +11,7 @@ Interactive 3D view of mainland Portugal's terrain, the **GeodPT08 geoid** (mean
 | **Ellipsoid** (purple) | A smooth mathematical surface. Height zero for GPS. |
 | **Gap N** (red) | The geoid undulation: how far the geoid sits above the ellipsoid. |
 
-Everything is drawn at true 1:1 scale, heights in the same units as distances, so the country looks almost flat and the 50 m gap is too thin to see in 3D; the pinned-point panel reads it exactly. Click the ground or the geoid to pin a point and read its N and ground height, and see **H = h − N** worked out.
+By default the gap N is exaggerated 1,000 times, so the geoid floats 45–58 km above the ellipsoid and its tilt across the country shows; the ground on top of it stays at true scale. Switch **Exaggerate gap N ×1,000** off to draw everything at true 1:1 scale, heights in the same units as distances: the country looks almost flat and the 50 m gap is too thin to see. Either way the pinned-point panel reads the true N. Click the ground or the geoid to pin a point and read its N and ground height, and see **H = h − N** worked out.
 
 ## Run it
 
