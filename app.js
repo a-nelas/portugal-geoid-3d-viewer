@@ -152,20 +152,18 @@
     };
   }
 
-  // Plotly's 3D surface picking breaks (stack overflow, no hover) when z has nulls, so cells
-  // outside Portugal sit just under the geoid and are made invisible with an opacity scale:
-  // they get surfacecolor -SEA, which maps below the `cut` where opacity drops to 0.
+  // Cells outside Portugal are pushed far below the height axis, where Plotly clips them.
+  // Not nulls: they break 3D surface picking (no hover). Not an opacityscale either: that
+  // sends the whole surface through the transparent pass, which doesn't depth-sort, so far
+  // peaks were drawn over near ones.
   // (Surface hovertemplates only expose x/y/z, so the exact H is shown in the pin readout.)
-  var SEA = 60;
+  var CLIPPED = -1000;
   function groundTrace(g) {
-    var hMax = g.stats.hMax, cut = SEA / (hMax + SEA);
-    var z = rows(g, function (k) { return g.H[k] < 0 ? g.N[k] - 1 : g.N[k] + g.H[k]; });
-    var color = rows(g, function (k) { return g.H[k] < 0 ? -SEA : g.H[k]; });
-    var scale = [[0, GROUND_SCALE[0][1]]].concat(GROUND_SCALE.map(function (s) { return [cut + s[0] * (1 - cut), s[1]]; }));
+    var z = rows(g, function (k) { return g.H[k] < 0 ? CLIPPED : g.N[k] + g.H[k]; });
+    var color = rows(g, function (k) { return Math.max(0, g.H[k]); });
     return {
       type: 'surface', name: 'Ground', x: g.X, y: g.Y, z: z, surfacecolor: color,
-      colorscale: scale, cmin: -SEA, cmax: hMax, showscale: false,
-      opacityscale: [[0, 0], [cut * 0.98, 0], [cut, 1], [1, 1]],
+      colorscale: GROUND_SCALE, cmin: 0, cmax: g.stats.hMax, showscale: false, opacity: 1,
       lighting: { ambient: 0.6, diffuse: 0.8, specular: 0.05, roughness: 1, fresnel: 0.05 },
       lightposition: { x: -1e5, y: -1e5, z: 2e5 },
       contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
@@ -173,9 +171,22 @@
     };
   }
 
+  // Split the coarse outline into steps no longer than `maxStep` degrees, so each sample
+  // can take the surface height under it instead of a straight edge cutting through hills.
+  function densify(ring, maxStep) {
+    var out = [];
+    for (var k = 0; k < ring.length - 1; k++) {
+      var a = ring[k], b = ring[k + 1];
+      var n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / maxStep));
+      for (var s = 0; s < n; s++) out.push([a[0] + (b[0] - a[0]) * s / n, a[1] + (b[1] - a[1]) * s / n]);
+    }
+    out.push(ring[ring.length - 1]);
+    return out;
+  }
+
   function outlineTraces(g) {
     var x = [], y = [], zE = [], zGeoid = [], zGround = [];
-    g.outline.forEach(function (p) {
+    densify(g.outline, g.step / 2).forEach(function (p) {
       var n = geoidAt(g, p[0], p[1]);
       if (n === null) return;
       x.push(p[0]); y.push(p[1]); zE.push(LIFT);
