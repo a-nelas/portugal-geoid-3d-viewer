@@ -22,7 +22,7 @@
         <p>Terrain, geoid and ellipsoid in 3D: why GPS heights differ from sea-level heights</p>
       </div>
     </div>
-    <p class="credit">Geoid: GeodPT08 (DGT) · Terrain: SRTM (NASA) · Outline: © EuroGeographics</p>
+    <p class="credit">Geoid: GeodPT08 (DGT) · Terrain: Copernicus DEM (© DLR, Airbus) · Outline: © EuroGeographics</p>
   </header>
 
   <main class="app">
@@ -30,6 +30,7 @@
     <section class="viewer" aria-label="3D view of the terrain, the geoid and the ellipsoid">
       <div class="stage">
         <div id="plot"></div>
+        <p class="scale-badge">Vertical scale: true 1:1 (heights not stretched)</p>
         <div class="loading" id="loading" role="status">
           <div class="spinner" aria-hidden="true"></div>
           <p id="loadingText">Loading the geoid and terrain…</p>
@@ -90,7 +91,7 @@
           <li><span class="sw" style="--c:var(--geoid)"></span><div><b class="c-geoid">Geoid</b>: the blue surface floating above it, visible over the sea and Spain. Height zero for sea level.</div></li>
           <li><span class="sw" style="--c:var(--n)"></span><div><b class="c-n">N</b>: the vertical gap between them, drawn in red along the coast and at the pin.</div></li>
         </ul>
-        <p class="muted">The height axis is fitted to the box, so it is far more stretched than the map. Next to 2&nbsp;km mountains the 50&nbsp;m gap is a thin band: turn <em>Ground</em> off and the axis zooms onto the geoid. Drag to rotate, scroll to zoom, and switch to <em>Side</em> to see it edge-on, like the diagram below.</p>
+        <p class="muted">Heights are drawn at true scale, in the same units as the map. Portugal is 630&nbsp;km long and under 2&nbsp;km high, so the country really is this flat, and the 50&nbsp;m geoid gap is far too thin to see in 3D. The <em>Pinned point</em> panel reads N exactly. Drag to rotate and scroll to zoom in on the relief.</p>
       </section>
 
       <section>
@@ -161,7 +162,7 @@
         <h2>About the data</h2>
         <ul class="terms">
           <li><b>Geoid</b>: GeodPT08, the Portuguese geoid model from the Direção-Geral do Território (DGT). <span id="gridInfo"></span></li>
-          <li><b>Terrain</b>: SRTM 90&nbsp;m elevation (NASA, public domain) via OpenTopoData, sampled at each grid node, so peaks are smoothed a little.</li>
+          <li><b>Terrain</b>: Copernicus DEM GLO-90. Each 2.8&nbsp;km cell is the average of the 900 90&nbsp;m pixels inside it, so summits read lower than their peak height (Torre&rsquo;s cell: 1,789&nbsp;m). © DLR e.V. 2010&ndash;2014 and © Airbus Defence and Space GmbH 2014&ndash;2018, provided under COPERNICUS by the European Union and ESA.</li>
           <li><b>Outline</b>: GISCO country polygon (1:20 million), © EuroGeographics. Madeira and the Azores are left out.</li>
         </ul>
         <p class="muted">All three are merged into one small file, <code>data/portugal.json</code>, by <code>tools/build_data.py</code>. Serve the folder over HTTP (for example <code>python -m http.server</code>); opening the file directly blocks the data from loading.</p>

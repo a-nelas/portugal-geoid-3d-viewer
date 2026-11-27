@@ -6,12 +6,12 @@ Interactive 3D view of mainland Portugal's terrain, the **GeodPT08 geoid** (mean
 
 | Layer | Meaning |
 | --- | --- |
-| **Ground** (green) | Real terrain (SRTM) at its true height above the geoid. |
+| **Ground** (green) | Real terrain (Copernicus DEM, averaged per 2.8 km cell) at its true height above the geoid. |
 | **Geoid** (blue) | Where gravity puts "sea level". Height zero for maps and road signs. |
 | **Ellipsoid** (purple) | A smooth mathematical surface. Height zero for GPS. |
 | **Gap N** (red) | The geoid undulation: how far the geoid sits above the ellipsoid. |
 
-Horizontal proportions are true; the height axis is fitted to the box (0–2,000 m with the ground on, 0–70 m with it off, so the geoid's shape shows). Click the ground or the geoid to pin a point and read its N and ground height, and see **H = h − N** worked out.
+Everything is drawn at true 1:1 scale, heights in the same units as distances, so the country looks almost flat and the 50 m gap is too thin to see in 3D; the pinned-point panel reads it exactly. Click the ground or the geoid to pin a point and read its N and ground height, and see **H = h − N** worked out.
 
 ## Run it
 
@@ -31,7 +31,7 @@ Then open <http://localhost:8791>.
 python tools/build_data.py
 ```
 
-The script uses the Python standard library only. It downloads the outline and about 15,000 elevation samples once (around 3 minutes, at one request per second) and caches them in `data/source/`.
+The script needs Python with numpy. The first run downloads the outline and about 30 Copernicus DEM tiles (about 130 MB, cached in the git-ignored `data/source/dem/`), then averages the 90 m pixels inside each 2.8 km grid cell.
 
 ## Files
 
@@ -41,13 +41,13 @@ styles.css             layout and theme
 app.js                 3D scene (Plotly gl3d) and controls
 icon.svg               favicon / logo
 data/portugal.json     built data the page loads
-data/source/           GeodPT08.dat, GISCO outline, elevation cache
+data/source/           GeodPT08.dat, GISCO outline (DEM tiles cached in dem/)
 tools/build_data.py    builds data/portugal.json
 ```
 
 ## Data sources
 
 - **GeodPT08** geoid model: Direção-Geral do Território (DGT), Portugal.
-- **Terrain**: SRTM 90 m (NASA, public domain), retrieved through [OpenTopoData](https://www.opentopodata.org/).
+- **Terrain**: [Copernicus DEM GLO-90](https://registry.opendata.aws/copernicus-dem/). © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the European Union and ESA; all rights reserved.
 - **Outline**: GISCO country polygons, 1:20 million. © EuroGeographics for the administrative boundaries.
 - **Rendering**: [Plotly.js](https://plotly.com/javascript/) 2.30 (gl3d bundle).

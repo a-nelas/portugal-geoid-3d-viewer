@@ -4,8 +4,7 @@
   // ---------- Config ----------
   var DATA_URL = 'data/portugal.json';  // built by tools/build_data.py
   var LIFT = 0.4;                       // metres; keeps lines off the surfaces (z-fighting)
-  var LIFT_GROUND = 8;                  // same, for lines on the ground (height axis spans ~2 km)
-  var BOX_Z = 0.4;                      // box height relative to its longest side (auto-fit)
+  var LIFT_GROUND = 2;                  // same, for lines on the ground
 
   var C = {
     geoid: '#4cc9f0', ellipsoid: '#b48cff', n: '#ef476f', ground: '#7fb069',
@@ -241,9 +240,10 @@
     var midLat = (g.Y[0] + g.Y[g.ny - 1]) / 2 * Math.PI / 180;
     var kmX = (g.X[g.nx - 1] - g.X[0]) * 111.32 * Math.cos(midLat);
     var kmY = (g.Y[g.ny - 1] - g.Y[0]) * 110.57;
+    var kmZ = zTop() / 1000;
     var m = Math.max(kmX, kmY);
-    // Horizontal proportions are true; the height axis is fitted to a fixed box height
-    return { x: kmX / m, y: kmY / m, z: BOX_Z };
+    // True 1:1 scale: heights use the same km as the map, no vertical stretching
+    return { x: kmX / m, y: kmY / m, z: kmZ / m };
   }
 
   function layout() {
@@ -261,7 +261,8 @@
         camera: CAMERAS.perspective,
         xaxis: axis('Longitude', { ticksuffix: '°', dtick: 1 }),
         yaxis: axis('Latitude', { ticksuffix: '°', dtick: 1 }),
-        zaxis: axis('Height above ellipsoid (m)', { range: [0, zTop()] })
+        // At 1:1 the box is a few pixels tall, so its ticks and title would pile up
+        zaxis: axis('', { range: [0, zTop()], showticklabels: false, showgrid: false })
       }
     };
   }
@@ -316,7 +317,7 @@
   function setGround(on) {
     state.groundOn = on;
     Plotly.restyle(plotEl, { z: [on ? state.outlineZ.ground : state.outlineZ.geoid] }, [T.outlineTop]);
-    Plotly.relayout(plotEl, { 'scene.zaxis.range': [0, zTop()] });
+    Plotly.relayout(plotEl, { 'scene.zaxis.range': [0, zTop()], 'scene.aspectratio': aspect() });
     drawProbe();
   }
 
