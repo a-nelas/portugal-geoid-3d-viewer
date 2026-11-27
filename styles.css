@@ -214,6 +214,10 @@ body {
   font-size: 11px;
   color: var(--muted);
 }
+.scale + .scale { margin-top: 6px; }
+.scale-name { width: 1ch; font-weight: 700; }
+.scale span:nth-child(2) { min-width: 4ch; text-align: right; }
+.scale span:last-child { min-width: 7ch; }
 .ramp {
   flex: 1;
   height: 8px;

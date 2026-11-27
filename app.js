@@ -11,7 +11,10 @@
     ink: '#e8ebf4', muted: '#98a1b6', faint: '#6f7994', grid: '#222b45', line: '#323e60'
   };
   var GEOID_SCALE = [[0, '#173a7a'], [0.35, '#1f6fb8'], [0.7, '#4cc9f0'], [1, '#c4f1ff']];
-  var GROUND_SCALE = [[0, '#2f4a33'], [0.15, '#4f7a45'], [0.4, '#8fae6a'], [0.7, '#c9b98a'], [1, '#f1ece0']];
+  // Hypsometric tints anchored to real heights (metres), so a colour always means the same
+  // height. Half of mainland Portugal is below ~240 m, so the low end gets more stops.
+  var GROUND_STOPS = [[0, '#2f5d34'], [100, '#46803f'], [250, '#7fa653'], [500, '#c2bd72'],
+                      [800, '#b8925a'], [1200, '#8f6c4c'], [1600, '#b9aea0'], [2000, '#f1ece0']];
   var FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif';
 
   var DEFAULT_PIN = { lon: -9.1393, lat: 38.7223, name: 'Lisbon' };
@@ -47,7 +50,35 @@
     var X = new Array(d.nx), Y = new Array(d.ny);
     for (var i = 0; i < d.nx; i++) X[i] = +(d.lon0 + i * d.step).toFixed(6);
     for (var j = 0; j < d.ny; j++) Y[j] = +(d.lat0 + j * d.step).toFixed(6);
-    return { lon0: d.lon0, lat0: d.lat0, step: d.step, nx: d.nx, ny: d.ny, N: N, H: H, X: X, Y: Y, outline: d.outline, stats: d.stats };
+    var hMin = Infinity, hMax = -Infinity;
+    for (var m = 0; m < size; m++) { if (H[m] >= 0) { if (H[m] < hMin) hMin = H[m]; if (H[m] > hMax) hMax = H[m]; } }
+    var stats = Object.assign({}, d.stats, { hMin: hMin, hMax: hMax });
+    return { lon0: d.lon0, lat0: d.lat0, step: d.step, nx: d.nx, ny: d.ny, N: N, H: H, X: X, Y: Y, outline: d.outline, stats: stats };
+  }
+
+  // ---------- Ground colours ----------
+  function hexToRgb(h) { return [1, 3, 5].map(function (i) { return parseInt(h.slice(i, i + 2), 16); }); }
+  function rgbToHex(c) { return '#' + c.map(function (v) { return Math.round(v).toString(16).padStart(2, '0'); }).join(''); }
+
+  // Colour of the tint ramp at height h (linear between the fixed stops)
+  function tintAt(h) {
+    var s = GROUND_STOPS;
+    if (h <= s[0][0]) return s[0][1];
+    for (var i = 1; i < s.length; i++) {
+      if (h <= s[i][0]) {
+        var t = (h - s[i - 1][0]) / (s[i][0] - s[i - 1][0]), a = hexToRgb(s[i - 1][1]), b = hexToRgb(s[i][1]);
+        return rgbToHex(a.map(function (v, k) { return v + (b[k] - v) * t; }));
+      }
+    }
+    return s[s.length - 1][1];
+  }
+
+  // Plotly colorscale spanning exactly the data's lowest to highest ground: [[0..1, colour], ...]
+  function groundScale(hMin, hMax) {
+    var span = Math.max(1, hMax - hMin), out = [[0, tintAt(hMin)]];
+    GROUND_STOPS.forEach(function (s) { if (s[0] > hMin && s[0] < hMax) out.push([(s[0] - hMin) / span, s[1]]); });
+    out.push([1, tintAt(hMax)]);
+    return out;
   }
 
   // Cell containing (lon, lat): {i, j, tx, ty}, or null when outside the grid. O(1).
@@ -159,10 +190,11 @@
   var CLIPPED = -1000;
   function groundTrace(g) {
     var z = rows(g, function (k) { return g.H[k] < 0 ? CLIPPED : g.N[k] + g.H[k]; });
-    var color = rows(g, function (k) { return Math.max(0, g.H[k]); });
+    var s = g.stats;
+    var color = rows(g, function (k) { return g.H[k] < 0 ? s.hMin : g.H[k]; });
     return {
       type: 'surface', name: 'Ground', x: g.X, y: g.Y, z: z, surfacecolor: color,
-      colorscale: GROUND_SCALE, cmin: 0, cmax: g.stats.hMax, showscale: false, opacity: 1,
+      colorscale: groundScale(s.hMin, s.hMax), cmin: s.hMin, cmax: s.hMax, showscale: false, opacity: 1,
       lighting: { ambient: 0.6, diffuse: 0.8, specular: 0.05, roughness: 1, fresnel: 0.05 },
       lightposition: { x: -1e5, y: -1e5, z: 2e5 },
       contours: { x: { highlight: false }, y: { highlight: false }, z: { highlight: false } },
@@ -375,6 +407,11 @@
       var g = state.g = toGrid(d), s = g.stats;
       $('#nMin').textContent = s.nMin.toFixed(1);
       $('#nMax').textContent = s.nMax.toFixed(1) + ' m';
+      $('#hMin').textContent = s.hMin;
+      $('#hMax').textContent = s.hMax.toLocaleString('en-US') + ' m';
+      $('#groundRamp').style.background = 'linear-gradient(90deg, ' + groundScale(s.hMin, s.hMax).map(function (c) {
+        return c[1] + ' ' + (c[0] * 100).toFixed(1) + '%';
+      }).join(', ') + ')';
       $('#gridInfo').textContent = g.ny + ' × ' + g.nx + ' nodes at ' + g.step + '° spacing (about 2.8 km); N ranges from ' +
         s.nMin.toFixed(1) + ' to ' + s.nMax.toFixed(1) + ' m.';
 

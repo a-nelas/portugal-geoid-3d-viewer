@@ -47,9 +47,16 @@
           <button class="chip" type="button" data-layer="borders" aria-pressed="true" style="--c:var(--ink)"><span class="sw"></span>Outline</button>
         </div>
         <div class="scale" aria-label="Geoid colour scale">
+          <span class="scale-name c-geoid" title="Geoid height above the ellipsoid">N</span>
           <span id="nMin">45</span>
           <div class="ramp"></div>
           <span id="nMax">58 m</span>
+        </div>
+        <div class="scale" aria-label="Ground colour scale">
+          <span class="scale-name c-ground" title="Ground height above sea level">H</span>
+          <span id="hMin">0</span>
+          <div class="ramp" id="groundRamp"></div>
+          <span id="hMax">1,813 m</span>
         </div>
       </div>
 
